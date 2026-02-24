@@ -11,6 +11,7 @@ from api.trade import router as trade_router
 from api.ai import router as ai_router
 from api.whatsapp import router as whatsapp_router
 from api.telegram import router as telegram_router
+from api.alerts import router as alerts_router
 from services.worker import run_worker
 
 logging.basicConfig(level=logging.INFO)
@@ -47,6 +48,7 @@ app.include_router(trade_router)
 app.include_router(ai_router)
 app.include_router(whatsapp_router)
 app.include_router(telegram_router)
+app.include_router(alerts_router)
 
 
 @app.get("/health")
