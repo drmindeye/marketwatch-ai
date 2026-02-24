@@ -1,4 +1,4 @@
-"""WhatsApp Cloud API (Meta Graph API) — direct integration, no SDK."""
+"""WhatsApp Cloud API (Meta Graph API) — alerts, interactive menus, bot interface."""
 
 import hashlib
 import hmac
@@ -22,6 +22,82 @@ def verify_whatsapp_signature(payload: bytes, signature: str) -> bool:
     ).hexdigest()
     received = signature.removeprefix("sha256=")
     return hmac.compare_digest(expected, received)
+
+
+async def _post(url: str, payload: dict) -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                url,
+                json=payload,
+                headers={"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"},
+            )
+            resp.raise_for_status()
+            return True
+    except httpx.HTTPStatusError as exc:
+        logger.error("WhatsApp API error: %s", exc.response.text)
+        return False
+    except Exception as exc:
+        logger.error("WhatsApp send error: %s", exc)
+        return False
+
+
+async def send_text_message(phone: str, text: str) -> bool:
+    """Send a plain text message."""
+    url = f"{GRAPH_URL}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    return await _post(url, {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": "text",
+        "text": {"body": text},
+    })
+
+
+async def send_button_message(phone: str, body: str, buttons: list[tuple[str, str]]) -> bool:
+    """Send interactive button message (max 3 buttons).
+    buttons = [(id, label), ...]
+    """
+    url = f"{GRAPH_URL}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    return await _post(url, {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": "interactive",
+        "interactive": {
+            "type": "button",
+            "body": {"text": body},
+            "action": {
+                "buttons": [
+                    {"type": "reply", "reply": {"id": bid, "title": label[:20]}}
+                    for bid, label in buttons[:3]
+                ]
+            },
+        },
+    })
+
+
+async def send_list_message(
+    phone: str,
+    body: str,
+    button_label: str,
+    sections: list[dict],
+) -> bool:
+    """Send interactive list message.
+    sections = [{"title": "...", "rows": [{"id": "...", "title": "...", "description": "..."}]}]
+    """
+    url = f"{GRAPH_URL}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
+    return await _post(url, {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": "interactive",
+        "interactive": {
+            "type": "list",
+            "body": {"text": body},
+            "action": {
+                "button": button_label[:20],
+                "sections": sections,
+            },
+        },
+    })
 
 
 async def send_alert_template(
@@ -77,35 +153,8 @@ async def send_alert_template(
             logger.info("WhatsApp alert sent to %s for %s", phone, symbol)
             return True
     except httpx.HTTPStatusError as exc:
-        logger.error(
-            "WhatsApp send failed %s: %s", phone, exc.response.text
-        )
+        logger.error("WhatsApp send failed %s: %s", phone, exc.response.text)
         return False
     except Exception as exc:
         logger.error("WhatsApp send error %s: %s", phone, exc)
-        return False
-
-
-async def send_text_message(phone: str, text: str) -> bool:
-    """Send a plain text WhatsApp message (for session windows)."""
-    url = f"{GRAPH_URL}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
-
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": phone,
-        "type": "text",
-        "text": {"body": text},
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                url,
-                json=payload,
-                headers={"Authorization": f"Bearer {settings.WHATSAPP_ACCESS_TOKEN}"},
-            )
-            resp.raise_for_status()
-            return True
-    except Exception as exc:
-        logger.error("WhatsApp text send error: %s", exc)
         return False
