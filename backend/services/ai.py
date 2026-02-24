@@ -4,7 +4,7 @@ import anthropic
 
 from core.config import settings
 
-MODEL = "claude-sonnet-4-6"
+MODEL = "claude-3-5-sonnet-20241022"
 
 SYSTEM_PROMPT = """You are MarketWatch AI's trading assistant. You provide concise,
 actionable Forex and market insights. Keep summaries under 120 words.
