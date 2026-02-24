@@ -48,6 +48,36 @@ async def _get_user_tier(telegram_id: str) -> str:
         return "free"
 
 
+async def _link_account(bot: Bot, chat_id: int, email: str) -> None:
+    """Link this Telegram ID to a MarketWatch account by email."""
+    try:
+        supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+        result = (
+            supabase.table("profiles")
+            .update({"telegram_id": str(chat_id)})
+            .eq("email", email.lower().strip())
+            .execute()
+        )
+        if result.data:
+            await bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    f"✅ *Account linked\\!*\n\n"
+                    f"Your Telegram is now connected to *{email}*\\.\n"
+                    f"You'll receive price alerts here from now on\\."
+                ),
+                parse_mode="MarkdownV2",
+            )
+        else:
+            await bot.send_message(
+                chat_id=chat_id,
+                text="❌ No account found with that email. Make sure you're registered at MarketWatch AI.",
+            )
+    except Exception as exc:
+        logger.error("Link account error: %s", exc)
+        await bot.send_message(chat_id=chat_id, text="⚠️ Something went wrong. Please try again.")
+
+
 async def _handle_message(bot: Bot, chat_id: int, text: str) -> None:
     """Route incoming message to the right handler."""
     tid = str(chat_id)
@@ -60,7 +90,8 @@ async def _handle_message(bot: Bot, chat_id: int, text: str) -> None:
             text=(
                 f"👋 *Welcome to MarketWatch AI\\!*\n\n"
                 f"Your Telegram ID is:\n`{chat_id}`\n\n"
-                f"Add this in your MarketWatch profile to receive price alerts\\.\n\n"
+                f"To receive price alerts, link your account:\n"
+                f"`/link your@email\\.com`\n\n"
                 f"💬 You can also ask me any market question and I'll answer using AI\\.\n"
                 f"Free users get {FREE_LIMIT} questions per session\\. "
                 f"Upgrade to *PRO* for unlimited AI chat\\."
@@ -69,13 +100,26 @@ async def _handle_message(bot: Bot, chat_id: int, text: str) -> None:
         )
         return
 
+    # /link <email>
+    if text.startswith("/link"):
+        parts = text.split(maxsplit=1)
+        if len(parts) < 2 or "@" not in parts[1]:
+            await bot.send_message(
+                chat_id=chat_id,
+                text="Usage: /link your@email.com",
+            )
+            return
+        await _link_account(bot, chat_id, parts[1])
+        return
+
     # /help
     if text == "/help":
         await bot.send_message(
             chat_id=chat_id,
             text=(
                 "🤖 *MarketWatch AI Bot*\n\n"
-                "/start \\- Show your Telegram ID\n"
+                "/start \\- Welcome message\n"
+                "/link email \\- Link your MarketWatch account\n"
                 "/clear \\- Clear chat history\n"
                 "/help \\- Show this message\n\n"
                 "Or just type any market question\\!"
@@ -122,7 +166,7 @@ async def _handle_message(bot: Bot, chat_id: int, text: str) -> None:
         logger.error("Claude chat error for %s: %s — %r", tid, type(exc).__name__, str(exc))
         await bot.send_message(
             chat_id=chat_id,
-            text=f"⚠️ AI error: {type(exc).__name__}. Check that ANTHROPIC_API_KEY is set in Railway.",
+            text="⚠️ AI is temporarily unavailable. Please try again shortly.",
         )
         return
 

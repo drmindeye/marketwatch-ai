@@ -30,14 +30,19 @@ export default function SettingsPage() {
         .from("profiles")
         .select("full_name, email, tier, telegram_id, whatsapp")
         .eq("id", session.user.id)
-        .single();
+        .maybeSingle();
 
-      if (data) {
-        setProfile(data);
-        setFullName(data.full_name ?? "");
-        setTelegramId(data.telegram_id ?? "");
-        setWhatsapp(data.whatsapp ?? "");
-      }
+      const profile = data ?? {
+        full_name: null,
+        email: session.user.email ?? "",
+        tier: "free",
+        telegram_id: null,
+        whatsapp: null,
+      };
+      setProfile(profile);
+      setFullName(profile.full_name ?? "");
+      setTelegramId(profile.telegram_id ?? "");
+      setWhatsapp(profile.whatsapp ?? "");
     }
     load();
   }, []);
