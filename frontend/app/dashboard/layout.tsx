@@ -6,6 +6,8 @@ const NAV = [
   { href: "/dashboard", label: "Overview", icon: "📊" },
   { href: "/dashboard/alerts", label: "Alerts", icon: "🔔" },
   { href: "/dashboard/calculator", label: "Calculator", icon: "🧮" },
+  { href: "/dashboard/history", label: "History", icon: "📜" },
+  { href: "/dashboard/settings", label: "Settings", icon: "⚙️" },
 ];
 
 export default async function DashboardLayout({
@@ -48,7 +50,7 @@ export default async function DashboardLayout({
               href="/dashboard/admin"
               className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-white/60 transition hover:bg-white/5 hover:text-white"
             >
-              <span>⚙️</span>
+              <span>🛡️</span>
               Admin
             </Link>
           )}

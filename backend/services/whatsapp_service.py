@@ -35,12 +35,12 @@ async def send_alert_template(
     """Send a pre-approved WhatsApp template message for an alert trigger.
 
     Template name: 'market_alert'
-    Parameters:
-      {{1}} = symbol
-      {{2}} = alert_type
-      {{3}} = price
-      {{4}} = target
-      {{5}} = AI summary
+    Named parameters (Meta-approved):
+      {{symbol}}        = trading pair / ticker
+      {{alert_type}}    = touch / cross / near
+      {{current_price}} = current market price
+      {{target_level}}  = alert target price
+      {{ai_summary}}    = AI market context
     """
     url = f"{GRAPH_URL}/{settings.WHATSAPP_PHONE_NUMBER_ID}/messages"
 
@@ -55,11 +55,11 @@ async def send_alert_template(
                 {
                     "type": "body",
                     "parameters": [
-                        {"type": "text", "text": symbol},
-                        {"type": "text", "text": alert_type.upper()},
-                        {"type": "text", "text": f"{price:.5f}"},
-                        {"type": "text", "text": f"{target:.5f}"},
-                        {"type": "text", "text": ai_summary},
+                        {"type": "text", "parameter_name": "symbol", "text": symbol},
+                        {"type": "text", "parameter_name": "alert_type", "text": alert_type.upper()},
+                        {"type": "text", "parameter_name": "current_price", "text": f"{price:.5f}"},
+                        {"type": "text", "parameter_name": "target_level", "text": f"{target:.5f}"},
+                        {"type": "text", "parameter_name": "ai_summary", "text": ai_summary},
                     ],
                 }
             ],
