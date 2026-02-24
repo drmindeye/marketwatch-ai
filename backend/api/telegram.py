@@ -119,10 +119,10 @@ async def _handle_message(bot: Bot, chat_id: int, text: str) -> None:
     try:
         reply = await asyncio.to_thread(claude_chat, history)
     except Exception as exc:
-        logger.error("Claude chat error for %s: %s", tid, exc)
+        logger.error("Claude chat error for %s: %s — %r", tid, type(exc).__name__, str(exc))
         await bot.send_message(
             chat_id=chat_id,
-            text="⚠️ AI is temporarily unavailable. Please try again shortly.",
+            text=f"⚠️ AI error: {type(exc).__name__}. Check that ANTHROPIC_API_KEY is set in Railway.",
         )
         return
 
