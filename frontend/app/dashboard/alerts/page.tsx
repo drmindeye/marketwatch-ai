@@ -63,33 +63,38 @@ export default function AlertsPage() {
     e.preventDefault();
     setCreating(true);
     setError(null);
-    const token = await getToken();
+    try {
+      const token = await getToken();
+      const res = await fetch(`${BACKEND}/api/alerts`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          symbol: symbol.toUpperCase(),
+          alert_type: alertType,
+          price: parseFloat(price),
+          direction: alertType === "near" || alertType === "zone" ? null : direction,
+          pip_buffer: parseFloat(pipBuffer),
+          zone_high: alertType === "zone" ? parseFloat(zoneHigh) : null,
+        }),
+      });
 
-    const res = await fetch(`${BACKEND}/api/alerts`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        symbol: symbol.toUpperCase(),
-        alert_type: alertType,
-        price: parseFloat(price),
-        direction: alertType === "near" || alertType === "zone" ? null : direction,
-        pip_buffer: parseFloat(pipBuffer),
-        zone_high: alertType === "zone" ? parseFloat(zoneHigh) : null,
-      }),
-    });
-
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.detail ?? "Failed to create alert");
-    } else {
-      setShowForm(false);
-      setPrice("");
-      await loadAlerts();
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.detail ?? "Failed to create alert");
+      } else {
+        setShowForm(false);
+        setPrice("");
+        setZoneHigh("");
+        await loadAlerts();
+      }
+    } catch (err) {
+      setError("Could not reach the server. Check your connection and try again.");
+    } finally {
+      setCreating(false);
     }
-    setCreating(false);
   }
 
   async function deleteAlert(id: string) {

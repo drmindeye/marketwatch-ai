@@ -32,12 +32,17 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="MarketWatch AI API", version="1.0.0", lifespan=lifespan)
 
-_frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-_allowed_origins = ["http://localhost:3000", _frontend_url]
+_frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
+_allowed_origins = list(set(filter(None, [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    _frontend_url,
+])))
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=list(set(_allowed_origins)),
+    allow_origins=_allowed_origins,
+    allow_origin_regex=r"https://.*\.railway\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

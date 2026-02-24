@@ -478,16 +478,44 @@ async def _handle_text(bot: Bot, chat_id: int, text: str) -> None:
             return
         email = parts[1].lower().strip()
         try:
-            r = _db().table("profiles").update({"telegram_id": tid}).eq("email", email).execute()
+            db = _db()
+            # Try updating existing profile first
+            r = db.table("profiles").update({"telegram_id": tid}).eq("email", email).execute()
             if r.data:
                 await bot.send_message(
                     chat_id,
                     f"✅ *Account Linked!*\n\nYour Telegram is now connected to `{email}`.\nUse /menu to get started.",
                     parse_mode="Markdown",
                 )
-            else:
-                await bot.send_message(chat_id, "❌ No account found with that email. Make sure you've signed up first.")
-        except Exception:
+                return
+
+            # Profile row missing — find auth user and create it
+            users_page = db.auth.admin.list_users()
+            auth_user = next(
+                (u for u in users_page if u.email and u.email.lower() == email),
+                None,
+            )
+            if not auth_user:
+                await bot.send_message(
+                    chat_id,
+                    "❌ No account found with that email.\n\nMake sure you signed up at the MarketWatch AI website first.",
+                )
+                return
+
+            # Create the missing profile row and link Telegram
+            db.table("profiles").upsert({
+                "id": str(auth_user.id),
+                "email": email,
+                "tier": "free",
+                "telegram_id": tid,
+            }).execute()
+            await bot.send_message(
+                chat_id,
+                f"✅ *Account Linked!*\n\nYour Telegram is now connected to `{email}`.\nUse /menu to get started.",
+                parse_mode="Markdown",
+            )
+        except Exception as exc:
+            logger.error("Link account error: %s", exc)
             await bot.send_message(chat_id, "⚠️ Something went wrong. Please try again.")
         return
 
