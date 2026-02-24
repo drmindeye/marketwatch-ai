@@ -1,0 +1,30 @@
+[project]
+name = "marketwatch-ai"
+
+# ── Backend service ────────────────────────────────────────────
+[[services]]
+name = "backend"
+source = "backend"
+
+[services.build]
+dockerfile = "Dockerfile"
+
+[services.deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+# ── Frontend service ───────────────────────────────────────────
+[[services]]
+name = "frontend"
+source = "frontend"
+
+[services.build]
+dockerfile = "Dockerfile"
+
+[services.deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
