@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
+import MobileNav from "@/components/dashboard/MobileNav";
 
 const NAV = [
   { href: "/dashboard", label: "Overview", icon: "📊" },
@@ -23,12 +24,15 @@ export default async function DashboardLayout({
     .from("profiles")
     .select("full_name, tier")
     .eq("id", session.user.id)
-    .single();
+    .maybeSingle();
+
+  const tier = profile?.tier ?? "free";
+  const isElite = tier === "elite";
 
   return (
     <div className="flex min-h-screen bg-black text-white">
-      {/* Sidebar */}
-      <aside className="hidden w-56 flex-col border-r border-white/10 bg-white/[0.02] px-4 py-8 md:flex">
+      {/* Desktop sidebar */}
+      <aside className="hidden w-56 flex-shrink-0 flex-col border-r border-white/10 bg-white/[0.02] px-4 py-8 md:flex">
         <Link href="/" className="mb-8 text-lg font-bold">
           Market<span className="text-emerald-400">Watch</span> AI
         </Link>
@@ -45,7 +49,7 @@ export default async function DashboardLayout({
             </Link>
           ))}
 
-          {profile?.tier === "elite" && (
+          {isElite && (
             <Link
               href="/dashboard/admin"
               className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-white/60 transition hover:bg-white/5 hover:text-white"
@@ -61,7 +65,7 @@ export default async function DashboardLayout({
             {session.user.email}
           </p>
           <span className="inline-block rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs capitalize text-emerald-400">
-            {profile?.tier ?? "free"}
+            {tier}
           </span>
 
           <form action="/auth/logout" method="POST" className="mt-3">
@@ -75,8 +79,19 @@ export default async function DashboardLayout({
         </div>
       </aside>
 
-      {/* Main */}
-      <main className="flex-1 overflow-auto px-6 py-8">{children}</main>
+      {/* Mobile nav (hamburger + drawer) */}
+      <div className="flex flex-1 flex-col md:contents">
+        <MobileNav
+          email={session.user.email ?? ""}
+          tier={tier}
+          isElite={isElite}
+        />
+
+        {/* Main content */}
+        <main className="flex-1 overflow-auto px-4 py-6 md:px-6 md:py-8">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
