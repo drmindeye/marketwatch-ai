@@ -54,6 +54,13 @@ def _is_triggered(alert: dict[str, Any], price: float) -> bool:
         case "near":
             return abs(price - target) <= buffer
 
+        case "zone":
+            # price = zone_low, zone_high = upper bound
+            zone_high = alert.get("zone_high")
+            if zone_high is None:
+                return False
+            return float(target) <= price <= float(zone_high)
+
     return False
 
 

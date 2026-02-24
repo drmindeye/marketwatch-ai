@@ -95,6 +95,7 @@ def _create_alert(
     price: float,
     direction: str | None,
     pip_buffer: float | None,
+    zone_high: float | None = None,
 ) -> bool:
     try:
         _db().table("alerts").insert({
@@ -104,6 +105,7 @@ def _create_alert(
             "price": price,
             "direction": direction,
             "pip_buffer": pip_buffer,
+            "zone_high": zone_high,
         }).execute()
         return True
     except Exception as e:
@@ -334,7 +336,7 @@ async def _handle_selection(phone: str, selection_id: str) -> None:
             )
             return
         _set_state(phone, "alert_symbol", {"user_id": profile["id"]})
-        await send_text_message(phone, "📝 *Create Alert — Step 1/3*\n\nEnter the trading symbol:\n(e.g. EURUSD, BTCUSD, XAUUSD)")
+        await send_text_message(phone, "📝 *Create Alert — Step 1/4*\n\nEnter the trading symbol:\n(e.g. EURUSD, BTCUSD, XAUUSD)")
 
     elif selection_id == "alert_view":
         profile = await _require_linked(phone)
@@ -389,29 +391,30 @@ async def _handle_state_input(phone: str, text: str, s: str, d: dict) -> None:
     if s == "alert_symbol":
         symbol = text.upper().replace("/", "").replace("-", "").replace(" ", "")
         _set_state(phone, "alert_type", {**d, "symbol": symbol})
-        await send_button_message(
+        await send_list_message(
             phone,
-            f"Symbol: {symbol}\n\n*Step 2/3* — Select alert type:",
-            [
-                ("type_touch", "🎯 Touch"),
-                ("type_cross", "⚡ Cross"),
-                ("type_near", "📍 Near"),
-            ],
+            f"Symbol: {symbol}\n\n*Step 2/4* — Select alert type:",
+            "Select Type",
+            [{
+                "title": "Alert Types",
+                "rows": [
+                    {"id": "type_touch", "title": "🎯 Touch", "description": "Triggers when price hits a level"},
+                    {"id": "type_cross", "title": "⚡ Cross", "description": "Triggers when price crosses a level"},
+                    {"id": "type_near", "title": "📍 Near", "description": "Triggers within X pips of a level"},
+                    {"id": "type_zone", "title": "📦 Zone", "description": "Triggers when price enters a zone"},
+                ],
+            }],
         )
         return
 
     if s == "alert_type":
-        # Handle text fallback if buttons not used
         t = text.lower()
-        if t not in ("touch", "cross", "near"):
-            await send_button_message(
-                phone,
-                "Please select an alert type:",
-                [("type_touch", "🎯 Touch"), ("type_cross", "⚡ Cross"), ("type_near", "📍 Near")],
-            )
+        if t not in ("touch", "cross", "near", "zone"):
+            await send_text_message(phone, "Please reply with: touch, cross, near, or zone")
             return
         _set_state(phone, "alert_price", {**d, "alert_type": t})
-        await send_text_message(phone, f"Type: {t}\n\n*Step 3/3* — Enter the target price:")
+        label = "zone low (lower bound)" if t == "zone" else "target price"
+        await send_text_message(phone, f"Type: {t}\n\n*Step 3/4* — Enter the {label}:")
         return
 
     if s == "alert_price":
@@ -431,6 +434,9 @@ async def _handle_state_input(phone: str, text: str, s: str, d: dict) -> None:
         elif alert_type == "near":
             _set_state(phone, "alert_pip_buffer", {**d, "price": price})
             await send_text_message(phone, f"Target: {price}\n\nEnter pip buffer (e.g. 5):")
+        elif alert_type == "zone":
+            _set_state(phone, "alert_zone_high", {**d, "price": price})
+            await send_text_message(phone, f"Zone Low: {price}\n\n*Step 4/4* — Enter the zone high (upper bound):")
         else:
             ok = _create_alert(d["user_id"], d["symbol"], alert_type, price, None, None)
             _clear_state(phone)
@@ -438,6 +444,25 @@ async def _handle_state_input(phone: str, text: str, s: str, d: dict) -> None:
                 await send_text_message(phone, f"✅ Alert Created!\n\n🎯 {d['symbol']} touch alert at {price}\n\nSend *menu* to manage alerts.")
             else:
                 await send_text_message(phone, "❌ Failed to create alert.")
+        return
+
+    if s == "alert_zone_high":
+        try:
+            zone_high = float(text)
+        except ValueError:
+            await send_text_message(phone, "❌ Enter a valid price:")
+            return
+        if zone_high <= d["price"]:
+            await send_text_message(phone, f"❌ Zone high must be above zone low ({d['price']}):")
+            return
+        ok = _create_alert(d["user_id"], d["symbol"], "zone", d["price"], None, None, zone_high)
+        _clear_state(phone)
+        msg = (
+            f"✅ Alert Created!\n\n📦 {d['symbol']} zone alert\n"
+            f"Triggers when price enters {d['price']} – {zone_high}"
+            if ok else "❌ Failed to create alert."
+        )
+        await send_text_message(phone, msg + "\n\nSend *menu* to manage alerts.")
         return
 
     if s == "alert_direction":

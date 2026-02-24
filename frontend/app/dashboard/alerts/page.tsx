@@ -13,13 +13,21 @@ interface Alert {
   price: number;
   direction: string | null;
   pip_buffer: number;
+  zone_high: number | null;
   is_active: boolean;
   triggered_at: string | null;
   created_at: string;
 }
 
-const ALERT_TYPES = ["touch", "cross", "near"];
+const ALERT_TYPES = ["touch", "cross", "near", "zone"];
 const DIRECTIONS = ["above", "below"];
+
+const TYPE_DESCRIPTIONS: Record<string, string> = {
+  touch: "Triggers when price reaches a level",
+  cross: "Triggers when price crosses a level from a direction",
+  near: "Triggers when price comes within X pips of a level",
+  zone: "Triggers when price enters a price zone (low–high range)",
+};
 
 export default function AlertsPage() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
@@ -31,6 +39,7 @@ export default function AlertsPage() {
   const [symbol, setSymbol] = useState("EURUSD");
   const [alertType, setAlertType] = useState("touch");
   const [price, setPrice] = useState("");
+  const [zoneHigh, setZoneHigh] = useState("");
   const [direction, setDirection] = useState("above");
   const [pipBuffer, setPipBuffer] = useState("5");
 
@@ -66,8 +75,9 @@ export default function AlertsPage() {
         symbol: symbol.toUpperCase(),
         alert_type: alertType,
         price: parseFloat(price),
-        direction: alertType === "near" ? null : direction,
+        direction: alertType === "near" || alertType === "zone" ? null : direction,
         pip_buffer: parseFloat(pipBuffer),
+        zone_high: alertType === "zone" ? parseFloat(zoneHigh) : null,
       }),
     });
 
@@ -140,22 +150,40 @@ export default function AlertsPage() {
                   <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
                 ))}
               </select>
+              <p className="mt-1 text-xs text-white/30">{TYPE_DESCRIPTIONS[alertType]}</p>
             </div>
 
             <div>
-              <label className="mb-1.5 block text-xs text-white/50">Price Level</label>
+              <label className="mb-1.5 block text-xs text-white/50">
+                {alertType === "zone" ? "Zone Low" : "Price Level"}
+              </label>
               <input
                 type="number"
                 step="any"
                 value={price}
                 onChange={(e) => setPrice(e.target.value)}
                 className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-500"
-                placeholder="1.10500"
+                placeholder={alertType === "zone" ? "1.08000" : "1.10500"}
                 required
               />
             </div>
 
-            {alertType !== "near" && (
+            {alertType === "zone" && (
+              <div>
+                <label className="mb-1.5 block text-xs text-white/50">Zone High</label>
+                <input
+                  type="number"
+                  step="any"
+                  value={zoneHigh}
+                  onChange={(e) => setZoneHigh(e.target.value)}
+                  className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-500"
+                  placeholder="1.08500"
+                  required
+                />
+              </div>
+            )}
+
+            {alertType !== "near" && alertType !== "zone" && (
               <div>
                 <label className="mb-1.5 block text-xs text-white/50">Direction</label>
                 <select
@@ -238,7 +266,11 @@ export default function AlertsPage() {
                     )}
                   </div>
                   <p className="mt-0.5 text-sm text-white/50">
-                    Level: <span className="text-white">{alert.price}</span>
+                    {alert.alert_type === "zone" ? (
+                      <>Zone: <span className="text-white">{alert.price} – {alert.zone_high}</span></>
+                    ) : (
+                      <>Level: <span className="text-white">{alert.price}</span></>
+                    )}
                     {alert.alert_type === "near" && (
                       <span className="ml-2 text-white/30">± {alert.pip_buffer} pips</span>
                     )}

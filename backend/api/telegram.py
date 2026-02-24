@@ -107,6 +107,7 @@ def _create_alert(
     price: float,
     direction: str | None,
     pip_buffer: float | None,
+    zone_high: float | None = None,
 ) -> bool:
     try:
         _db().table("alerts").insert({
@@ -116,6 +117,7 @@ def _create_alert(
             "price": price,
             "direction": direction,
             "pip_buffer": pip_buffer,
+            "zone_high": zone_high,
         }).execute()
         return True
     except Exception as e:
@@ -175,7 +177,10 @@ def _alert_type_kb() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton(text="🎯 Touch", callback_data="type_touch"),
             InlineKeyboardButton(text="⚡ Cross", callback_data="type_cross"),
+        ],
+        [
             InlineKeyboardButton(text="📍 Near", callback_data="type_near"),
+            InlineKeyboardButton(text="📦 Zone", callback_data="type_zone"),
         ],
         [InlineKeyboardButton(text="❌ Cancel", callback_data="menu_alerts")],
     ])
@@ -557,6 +562,13 @@ async def _handle_text(bot: Bot, chat_id: int, text: str) -> None:
                 f"Target: `{price}`\n\nEnter pip buffer — how many pips away to trigger (e.g. 5):",
                 parse_mode="Markdown",
             )
+        elif alert_type == "zone":
+            _set_state(tid, "alert_zone_high", {**d, "price": price})
+            await bot.send_message(
+                chat_id,
+                f"Zone Low: `{price}`\n\nNow enter the *zone high* (upper bound):",
+                parse_mode="Markdown",
+            )
         else:
             ok = _create_alert(d["user_id"], d["symbol"], alert_type, price, None, None)
             _clear_state(tid)
@@ -568,6 +580,28 @@ async def _handle_text(bot: Bot, chat_id: int, text: str) -> None:
                 )
             else:
                 await bot.send_message(chat_id, "❌ Failed to create alert.", reply_markup=_back_alerts_kb())
+        return
+
+    if s == "alert_zone_high":
+        try:
+            zone_high = float(text)
+        except ValueError:
+            await bot.send_message(chat_id, "❌ Invalid price. Enter a number (e.g. 1.08500):")
+            return
+        if zone_high <= d["price"]:
+            await bot.send_message(chat_id, f"❌ Zone high must be above zone low ({d['price']}):")
+            return
+        ok = _create_alert(d["user_id"], d["symbol"], "zone", d["price"], None, None, zone_high)
+        _clear_state(tid)
+        if ok:
+            await bot.send_message(
+                chat_id,
+                f"✅ *Alert Created!*\n\n📦 *{d['symbol']}* zone alert\n"
+                f"Triggers when price enters `{d['price']}` – `{zone_high}`",
+                parse_mode="Markdown", reply_markup=_back_alerts_kb(),
+            )
+        else:
+            await bot.send_message(chat_id, "❌ Failed to create alert.", reply_markup=_back_alerts_kb())
         return
 
     if s == "alert_pip_buffer":

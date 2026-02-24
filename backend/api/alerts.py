@@ -17,10 +17,11 @@ router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 class AlertCreate(BaseModel):
     symbol: str = Field(..., min_length=1, max_length=20)
-    alert_type: str = Field(..., pattern="^(touch|cross|near)$")
+    alert_type: str = Field(..., pattern="^(touch|cross|near|zone)$")
     price: float = Field(..., gt=0)
     direction: str | None = Field(default=None, pattern="^(above|below)$")
     pip_buffer: float = Field(default=5.0, gt=0)
+    zone_high: float | None = Field(default=None, gt=0)
 
 
 class AlertOut(BaseModel):
@@ -30,6 +31,7 @@ class AlertOut(BaseModel):
     price: float
     direction: str | None
     pip_buffer: float
+    zone_high: float | None
     is_active: bool
     triggered_at: str | None
     created_at: str
@@ -115,6 +117,7 @@ def create_alert(
             "price": body.price,
             "direction": body.direction,
             "pip_buffer": body.pip_buffer,
+            "zone_high": body.zone_high,
         })
         .execute()
     )
