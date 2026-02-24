@@ -21,7 +21,7 @@ class AlertCreate(BaseModel):
     price: float = Field(..., gt=0)
     direction: str | None = Field(default=None, pattern="^(above|below)$")
     pip_buffer: float = Field(default=5.0, gt=0)
-    zone_high: float | None = Field(default=None, gt=0)
+    zone_high: float | None = Field(default=None)
 
 
 class AlertOut(BaseModel):
@@ -30,7 +30,7 @@ class AlertOut(BaseModel):
     alert_type: str
     price: float
     direction: str | None
-    pip_buffer: float
+    pip_buffer: float | None
     zone_high: float | None
     is_active: bool
     triggered_at: str | None
@@ -107,6 +107,12 @@ def create_alert(
                 status_code=403,
                 detail="Free plan limited to 3 active alerts. Upgrade to Pro for unlimited.",
             )
+
+    if body.alert_type == "zone":
+        if body.zone_high is None:
+            raise HTTPException(status_code=422, detail="zone_high is required for zone alerts")
+        if body.zone_high <= body.price:
+            raise HTTPException(status_code=422, detail="zone_high must be greater than price (zone low)")
 
     row = (
         supabase.table("alerts")

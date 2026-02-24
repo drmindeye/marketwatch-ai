@@ -4,6 +4,7 @@ import asyncio
 import logging
 from typing import Any
 
+import httpx
 from aiogram import Bot, Dispatcher
 from aiogram.types import (
     CallbackQuery,
@@ -489,10 +490,25 @@ async def _handle_text(bot: Bot, chat_id: int, text: str) -> None:
                 )
                 return
 
-            # Profile row missing — find auth user and create it
-            users_page = db.auth.admin.list_users()
+            # Profile row missing — look up auth user via REST API and create profile
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"{settings.SUPABASE_URL}/auth/v1/admin/users",
+                    headers={
+                        "apikey": settings.SUPABASE_SERVICE_KEY,
+                        "Authorization": f"Bearer {settings.SUPABASE_SERVICE_KEY}",
+                    },
+                    params={"per_page": 1000, "page": 1},
+                )
+
+            if resp.status_code != 200:
+                logger.error("Auth admin API error: %s", resp.text)
+                await bot.send_message(chat_id, "⚠️ Something went wrong. Please try again.")
+                return
+
+            users = resp.json().get("users", [])
             auth_user = next(
-                (u for u in users_page if u.email and u.email.lower() == email),
+                (u for u in users if u.get("email", "").lower() == email),
                 None,
             )
             if not auth_user:
@@ -502,9 +518,9 @@ async def _handle_text(bot: Bot, chat_id: int, text: str) -> None:
                 )
                 return
 
-            # Create the missing profile row and link Telegram
+            # Create the missing profile row and link Telegram in one upsert
             db.table("profiles").upsert({
-                "id": str(auth_user.id),
+                "id": auth_user["id"],
                 "email": email,
                 "tier": "free",
                 "telegram_id": tid,
