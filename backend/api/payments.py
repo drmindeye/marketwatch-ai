@@ -11,10 +11,11 @@ from models.payment import PaystackEvent
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
-# Plan amounts in kobo (NGN)
+# Plan amounts in kobo (NGN) → tier granted on successful payment
 PLAN_AMOUNTS = {
-    500_000: "pro",   # ₦5,000
-    1_500_000: "elite",  # ₦15,000
+    200_000: "pro",    # ₦2,000 / week
+    700_000: "pro",    # ₦7,000 / month
+    1_500_000: "elite",  # ₦15,000 / month
 }
 
 

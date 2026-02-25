@@ -230,11 +230,32 @@ async def _handle_wa_message(phone: str, text: str, msg_type: str = "text") -> N
             await send_text_message(phone, "⚠️ Something went wrong. Please try again.")
         return
 
+    # Gate all other interactions behind a linked Pro account
+    profile = _get_profile(phone)
+    if not profile:
+        await send_text_message(
+            phone,
+            "👋 Welcome to *MarketWatch AI*!\n\n"
+            "To get started, send:\n*link your@email.com*\n\n"
+            "Don't have an account? Sign up on our website first.",
+        )
+        return
+    if profile.get("tier", "free") not in ("pro", "elite"):
+        await send_text_message(
+            phone,
+            "⚠️ *WhatsApp access is a Pro feature.*\n\n"
+            "Upgrade to unlock WhatsApp alerts:\n"
+            "• ₦2,000 / week\n"
+            "• ₦7,000 / month\n\n"
+            "Visit our website to upgrade.\n"
+            "Or use our free Telegram bot: @marketwatchai_bot",
+        )
+        return
+
     # Menu triggers
     if lower in ("menu", "hi", "hello", "start", "/start", "/menu"):
         _clear_state(phone)
-        profile = _get_profile(phone)
-        name = profile.get("full_name") or profile.get("email", "Trader") if profile else "Trader"
+        name = profile.get("full_name") or profile.get("email", "Trader")
         await _send_main_menu(phone, f"Welcome back, {name}!")
         return
 
@@ -324,16 +345,6 @@ async def _handle_selection(phone: str, selection_id: str) -> None:
     elif selection_id == "alert_create":
         profile = await _require_linked(phone)
         if not profile:
-            return
-        tier = profile.get("tier", "free")
-        limit = 3 if tier == "free" else 20
-        count = _count_active_alerts(profile["id"])
-        if count >= limit:
-            await send_text_message(
-                phone,
-                f"⚠️ Alert limit reached ({count}/{limit} for {tier} plan).\n"
-                "Delete an alert or upgrade to create more.",
-            )
             return
         _set_state(phone, "alert_symbol", {"user_id": profile["id"]})
         await send_text_message(phone, "📝 *Create Alert — Step 1/4*\n\nEnter the trading symbol:\n(e.g. EURUSD, BTCUSD, XAUUSD)")

@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 
 const PLAN_PRICES: Record<string, number> = {
-  pro: 500000,   // ₦5,000 in kobo
-  elite: 1500000, // ₦15,000 in kobo
+  pro: 700000,        // ₦7,000 / month in kobo
+  pro_weekly: 200000, // ₦2,000 / week in kobo
+  elite: 1500000,     // ₦15,000 / month in kobo
 };
 
 export async function POST(request: Request) {
