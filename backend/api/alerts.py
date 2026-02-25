@@ -1,6 +1,7 @@
 """Alert CRUD endpoints — protected by Supabase JWT."""
 
 import logging
+from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, status
@@ -95,17 +96,45 @@ def create_alert(
     tier = profile.data["tier"] if profile.data else "free"
 
     if tier == "free":
-        count = (
+        # Zone alerts are Pro-only
+        if body.alert_type == "zone":
+            raise HTTPException(
+                status_code=403,
+                detail="Zone alerts are a Pro feature. Upgrade to access.",
+            )
+
+        # Daily limit: 2 alerts per day (UTC)
+        today_start = date.today().isoformat() + "T00:00:00+00:00"
+        daily = (
             supabase.table("alerts")
             .select("id", count="exact")
             .eq("user_id", user_id)
-            .eq("is_active", True)
+            .gte("created_at", today_start)
             .execute()
         )
-        if (count.count or 0) >= 3:
+        if (daily.count or 0) >= 2:
             raise HTTPException(
                 status_code=403,
-                detail="Free plan limited to 3 active alerts. Upgrade to Pro for unlimited.",
+                detail="Free plan limited to 2 alerts per day. Upgrade to Pro for unlimited.",
+            )
+
+        # Pair limit: 1 unique symbol across active alerts
+        existing = (
+            supabase.table("alerts")
+            .select("symbol")
+            .eq("user_id", user_id)
+            .is_("triggered_at", "null")
+            .execute()
+        )
+        existing_symbols = {row["symbol"] for row in (existing.data or [])}
+        if existing_symbols and body.symbol.upper() not in existing_symbols:
+            current = next(iter(existing_symbols))
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Free plan limited to 1 trading pair (currently: {current}). "
+                    "Upgrade to Pro for unlimited pairs."
+                ),
             )
 
     if body.alert_type == "zone":

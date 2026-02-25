@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from datetime import date
 from typing import Any
 
 import httpx
@@ -148,6 +149,49 @@ def _count_active_alerts(user_id: str) -> int:
         return 0
 
 
+def _count_today_alerts(user_id: str) -> int:
+    try:
+        today_start = date.today().isoformat() + "T00:00:00+00:00"
+        r = (
+            _db().table("alerts")
+            .select("id", count="exact")
+            .eq("user_id", user_id)
+            .gte("created_at", today_start)
+            .execute()
+        )
+        return r.count or 0
+    except Exception:
+        return 0
+
+
+def _get_active_alert_symbols(user_id: str) -> set[str]:
+    try:
+        r = (
+            _db().table("alerts")
+            .select("symbol")
+            .eq("user_id", user_id)
+            .is_("triggered_at", "null")
+            .execute()
+        )
+        return {row["symbol"] for row in (r.data or [])}
+    except Exception:
+        return set()
+
+
+def _get_platform_stats() -> dict:
+    try:
+        db = _db()
+        total = db.table("profiles").select("id", count="exact").execute().count or 0
+        paid = db.table("profiles").select("id", count="exact").in_("tier", ["pro", "elite"]).execute().count or 0
+        free = db.table("profiles").select("id", count="exact").eq("tier", "free").execute().count or 0
+        expired = db.table("subscriptions").select("id", count="exact").eq("status", "expired").execute().count or 0
+        cancelled = db.table("subscriptions").select("id", count="exact").eq("status", "cancelled").execute().count or 0
+        return {"total": total, "paid": paid, "free": free, "expired": expired, "cancelled": cancelled}
+    except Exception as e:
+        logger.error("Stats error: %s", e)
+        return {}
+
+
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
 def _main_menu_kb() -> InlineKeyboardMarkup:
@@ -161,6 +205,7 @@ def _main_menu_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="⚙️ Settings", callback_data="menu_settings"),
         ],
         [InlineKeyboardButton(text="💬 AI Chat", callback_data="menu_chat")],
+        [InlineKeyboardButton(text="💎 Upgrade to Pro", callback_data="menu_upgrade")],
     ])
 
 
@@ -324,23 +369,42 @@ async def _handle_callback(bot: Bot, cq: CallbackQuery) -> None:
             parse_mode="Markdown",
         )
 
+    elif data == "menu_upgrade":
+        await bot.send_message(
+            chat_id,
+            "💎 *Upgrade to MarketWatch AI Pro*\n\n"
+            "*🔓 What you get:*\n"
+            "• Unlimited price alerts\n"
+            "• Unlimited trading pairs\n"
+            "• WhatsApp alert notifications\n"
+            "• Zone & correlation alerts\n"
+            "• Unlimited AI chat\n\n"
+            "*💰 Pricing:*\n"
+            "• Weekly: ₦2,000\n"
+            "• Monthly: ₦7,000\n\n"
+            f"👉 [Upgrade now]({settings.FRONTEND_URL}/dashboard)",
+            parse_mode="Markdown",
+            reply_markup=_back_main_kb(),
+        )
+
     # ── Alerts
     elif data == "alert_create":
         profile = await _require_linked(bot, chat_id, tid)
         if not profile:
             return
         tier = profile.get("tier", "free")
-        limit = 3 if tier == "free" else 20
-        count = _count_active_alerts(profile["id"])
-        if count >= limit:
-            await bot.send_message(
-                chat_id,
-                f"⚠️ Alert limit reached ({count}/{limit} for *{tier}* plan).\n"
-                "Delete an alert or upgrade to create more.",
-                parse_mode="Markdown", reply_markup=_back_alerts_kb(),
-            )
-            return
-        _set_state(tid, "alert_symbol", {"user_id": profile["id"]})
+        if tier == "free":
+            daily = _count_today_alerts(profile["id"])
+            if daily >= 2:
+                await bot.send_message(
+                    chat_id,
+                    "⚠️ *Daily limit reached!*\n\n"
+                    "Free plan allows *2 alerts per day*.\n\n"
+                    "💎 Upgrade to Pro for unlimited alerts!\n/upgrade",
+                    parse_mode="Markdown", reply_markup=_back_alerts_kb(),
+                )
+                return
+        _set_state(tid, "alert_symbol", {"user_id": profile["id"], "tier": tier})
         await bot.send_message(
             chat_id,
             "📝 *Create Alert — Step 1/3*\n\nEnter the trading symbol:\n_(e.g. EURUSD, BTCUSD, XAUUSD)_",
@@ -400,6 +464,15 @@ async def _handle_callback(bot: Bot, cq: CallbackQuery) -> None:
         if state["state"] != "alert_type":
             return
         alert_type = data[5:]
+        if alert_type == "zone" and state["data"].get("tier", "free") == "free":
+            await bot.send_message(
+                chat_id,
+                "🔒 *Zone alerts are a Pro feature.*\n\n"
+                "Upgrade to unlock Zone & correlation alerts.\n/upgrade",
+                parse_mode="Markdown", reply_markup=_back_alerts_kb(),
+            )
+            _clear_state(tid)
+            return
         _set_state(tid, "alert_price", {**state["data"], "alert_type": alert_type})
         await bot.send_message(
             chat_id,
@@ -454,12 +527,45 @@ async def _handle_callback(bot: Bot, cq: CallbackQuery) -> None:
 
 # ── Text message handler ──────────────────────────────────────────────────────
 
-async def _handle_text(bot: Bot, chat_id: int, text: str) -> None:
+async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None = None) -> None:
     tid = str(chat_id)
     text = text.strip()
 
     # ── Slash commands
-    if text in ("/start", "/menu"):
+    if text == "/start":
+        _clear_state(tid)
+        profile = _get_profile(tid)
+        linked_line = (
+            f"✅ Linked to: `{profile.get('email', '')}`  |  Plan: *{profile.get('tier', 'free').upper()}*"
+            if profile
+            else "⚠️ Not linked yet — use /link your@email.com to connect."
+        )
+        await bot.send_message(
+            chat_id,
+            f"🤖 *Welcome to MarketWatch AI Bot!*\n\n"
+            f"Your Telegram ID: `{tid}`\n"
+            f"{linked_line}\n\n"
+            "*📊 Features:*\n"
+            "🔔 Price Alerts — Touch, Cross, Near & Zone\n"
+            "🧮 Trade Calculator — Risk/Reward, Position Size, Pips\n"
+            "📜 Alert History — All triggered alerts\n"
+            "💬 AI Chat — Powered by DeepSeek AI\n"
+            "⚙️ Account Settings — Manage your profile\n\n"
+            "*📦 Plans:*\n"
+            "🆓 *Free* — 1 pair, 2 alerts/day, Telegram only\n"
+            "💎 *Pro* — Unlimited alerts & pairs, WhatsApp, Zone alerts\n\n"
+            "*Commands:*\n"
+            "/menu — Open main menu\n"
+            "/upgrade — View Pro plans & pricing\n"
+            "/link email — Connect your account\n"
+            "/id — Show your Telegram ID\n"
+            "/support — Contact support\n"
+            "/help — All commands",
+            parse_mode="Markdown",
+        )
+        return
+
+    if text == "/menu":
         _clear_state(tid)
         profile = _get_profile(tid)
         name = profile.get("full_name") or profile.get("email", "Trader") if profile else "Trader"
@@ -469,6 +575,64 @@ async def _handle_text(bot: Bot, chat_id: int, text: str) -> None:
             f"👋 *{greeting}*\n\nChoose an option below:",
             parse_mode="Markdown",
             reply_markup=_main_menu_kb(),
+        )
+        return
+
+    if text == "/upgrade":
+        await bot.send_message(
+            chat_id,
+            "💎 *Upgrade to MarketWatch AI Pro*\n\n"
+            "*🔓 What you get:*\n"
+            "• Unlimited price alerts\n"
+            "• Unlimited trading pairs\n"
+            "• WhatsApp alert notifications\n"
+            "• Zone & correlation alerts\n"
+            "• Unlimited AI chat\n\n"
+            "*💰 Pricing:*\n"
+            "• Weekly: ₦2,000\n"
+            "• Monthly: ₦7,000\n\n"
+            f"👉 [Upgrade now]({settings.FRONTEND_URL}/dashboard)",
+            parse_mode="Markdown",
+        )
+        return
+
+    if text == "/id":
+        await bot.send_message(
+            chat_id,
+            f"🪪 Your Telegram ID: `{tid}`",
+            parse_mode="Markdown",
+        )
+        return
+
+    if text == "/support":
+        await bot.send_message(
+            chat_id,
+            "🆘 *Need help?*\n\n"
+            "Contact our support team directly on Telegram:\n"
+            "👤 @MarketWatchSupport\n\n"
+            "We typically respond within a few hours.",
+            parse_mode="Markdown",
+        )
+        return
+
+    if text == "/stats":
+        profile = _get_profile(tid)
+        if not profile or not profile.get("is_admin"):
+            await bot.send_message(chat_id, "⛔ This command is for admins only.")
+            return
+        stats = _get_platform_stats()
+        if not stats:
+            await bot.send_message(chat_id, "⚠️ Could not fetch stats. Try again.")
+            return
+        await bot.send_message(
+            chat_id,
+            "📊 *MarketWatch AI — Platform Stats*\n\n"
+            f"👥 Total Users: *{stats.get('total', 0)}*\n"
+            f"💎 Pro/Elite Users: *{stats.get('paid', 0)}*\n"
+            f"🆓 Free Users: *{stats.get('free', 0)}*\n"
+            f"📋 Expired Subscriptions: *{stats.get('expired', 0)}*\n"
+            f"❌ Cancelled Subscriptions: *{stats.get('cancelled', 0)}*",
+            parse_mode="Markdown",
         )
         return
 
@@ -552,7 +716,11 @@ async def _handle_text(bot: Bot, chat_id: int, text: str) -> None:
         await bot.send_message(
             chat_id,
             "🤖 *MarketWatch AI — Commands*\n\n"
+            "/start — Welcome message & features\n"
             "/menu — Open main menu\n"
+            "/upgrade — View Pro plans & pricing\n"
+            "/id — Show your Telegram ID\n"
+            "/support — Contact support\n"
             "/link email — Link your MarketWatch account\n"
             "/setwhatsapp number — Save WhatsApp for alerts\n"
             "/clear — Clear AI chat history\n"
@@ -575,6 +743,19 @@ async def _handle_text(bot: Bot, chat_id: int, text: str) -> None:
     # Alert creation steps
     if s == "alert_symbol":
         symbol = text.upper().replace("/", "").replace("-", "").replace(" ", "")
+        if d.get("tier", "free") == "free":
+            existing_symbols = _get_active_alert_symbols(d["user_id"])
+            if existing_symbols and symbol not in existing_symbols:
+                current = next(iter(existing_symbols))
+                await bot.send_message(
+                    chat_id,
+                    f"⚠️ *Pair limit reached!*\n\n"
+                    f"Free plan allows *1 trading pair* (currently: *{current}*).\n\n"
+                    "Delete your existing alerts first, or upgrade to Pro for unlimited pairs.\n/upgrade",
+                    parse_mode="Markdown", reply_markup=_back_alerts_kb(),
+                )
+                _clear_state(tid)
+                return
         _set_state(tid, "alert_type", {**d, "symbol": symbol})
         await bot.send_message(
             chat_id,
@@ -827,7 +1008,9 @@ async def telegram_webhook(request: Request) -> dict[str, Any]:
     if update.callback_query:
         await _handle_callback(bot, update.callback_query)
     elif update.message and update.message.text:
-        await _handle_text(bot, update.message.chat.id, update.message.text)
+        from_user = update.message.from_user
+        first_name = from_user.first_name if from_user else None
+        await _handle_text(bot, update.message.chat.id, update.message.text, first_name)
 
     await _dp.feed_update(bot=bot, update=update)
     return {"ok": True}
