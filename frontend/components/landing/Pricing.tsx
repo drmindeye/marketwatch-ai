@@ -99,7 +99,7 @@ export default function Pricing() {
 
             <Button
               variant="outline"
-              className="border-white/20 text-white hover:bg-white/10"
+              className="border-white/50 bg-white/5 text-white hover:bg-white/15 hover:border-white/70"
               asChild
             >
               <Link href="/signup">Get Started</Link>
