@@ -3,37 +3,37 @@ const secondaryFeatures = [
     icon: "⚡",
     title: "4 Alert Types",
     description:
-      "Touch — price hits a level. Cross — price breaks through. Near — within X pips of a level. Zone — price enters your range.",
+      "Touch — price hits a level. Cross — price breaks through. Near — within X pips. Zone — price enters your range. Works on Forex, crypto, and gold.",
   },
   {
-    icon: "📊",
-    title: "Multi-Pair Watchlist",
+    icon: "⏰",
+    title: "Session & Custom Reminders",
     description:
-      "Watch correlated pairs simultaneously — EURUSD + GBPUSD, XAUUSD + DXY. Set alerts across your full watchlist.",
+      "Get pinged at Asian (00:00), London (08:00), and New York (13:00) session opens. Or set custom reminders — 'remind me at 9pm to review my BTCUSD trade.'",
   },
   {
     icon: "🤖",
     title: "AI Market Context",
     description:
-      "Every alert comes with a plain-English market summary from DeepSeek AI — so you know why the level matters.",
+      "Every alert includes a plain-English market summary from DeepSeek AI. Ask the bot anything — Forex analysis, crypto sentiment, trade ideas.",
   },
   {
     icon: "📱",
     title: "Telegram & WhatsApp",
     description:
-      "Free users get instant Telegram alerts. Pro users unlock WhatsApp too. Zero delay, zero missed trades.",
+      "Free users get instant Telegram alerts. Pro users unlock WhatsApp too. Link your account in seconds — no technical setup.",
+  },
+  {
+    icon: "📊",
+    title: "Correlation Groups",
+    description:
+      "Monitor Dollar Pairs, Safe Haven assets (Gold, CHF, BTC), and Risk-On pairs (GBP/JPY, ETH) side by side with live prices.",
   },
   {
     icon: "🧮",
     title: "Trade Calculator",
     description:
-      "Built-in Risk/Reward, Position Sizing, and Pip calculator. Know your exact exposure before you enter.",
-  },
-  {
-    icon: "🔄",
-    title: "Sub-30s Delivery",
-    description:
-      "Background workers poll live market data every 30 seconds. Alerts fire within seconds of your level being hit.",
+      "Risk/Reward, Position Sizing, and Pip calculator built in. Works for Forex lots and crypto units. Know your exposure before you enter.",
   },
 ];
 
@@ -133,15 +133,15 @@ export default function Features() {
               <ul className="mt-6 space-y-2 text-sm text-white/60">
                 <li className="flex items-center gap-2">
                   <span className="text-emerald-400">✓</span>
-                  Perfect for order blocks, supply/demand zones &amp; S/R ranges
+                  Perfect for order blocks, supply/demand zones &amp; key S/R ranges
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="text-emerald-400">✓</span>
-                  Works on every Forex pair, crypto, and commodity
+                  Works on Forex pairs, BTC, ETH, XAU, and all FMP-supported markets
                 </li>
                 <li className="flex items-center gap-2">
                   <span className="text-emerald-400">✓</span>
-                  Pro feature — unlimited zones across unlimited pairs
+                  Pro — unlimited zones across unlimited pairs and crypto assets
                 </li>
               </ul>
             </div>

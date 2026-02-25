@@ -20,9 +20,9 @@ export default function Hero() {
       </h1>
 
       <p className="mt-6 max-w-2xl text-lg text-white/60">
-        Most bots alert on a single price and miss by 2 pips. MarketWatch AI
-        monitors entire price zones — set a range, get notified the moment price
-        steps inside. Built for serious Forex &amp; crypto traders.
+        Your AI trading buddy for Forex and crypto. Zone alerts, session
+        reminders, AI market chat, correlation groups — all inside Telegram.
+        Built for traders who miss nothing.
       </p>
 
       <div className="mt-10 flex flex-wrap items-center justify-center gap-4">
@@ -31,7 +31,7 @@ export default function Hero() {
           className="bg-emerald-500 text-black hover:bg-emerald-400 px-8"
           asChild
         >
-          <Link href="/signup">Start Free on Telegram</Link>
+          <Link href="/signup">Start Free — Telegram + Web</Link>
         </Button>
         <Button
           size="lg"
@@ -44,9 +44,10 @@ export default function Hero() {
       </div>
 
       <div className="mt-16 flex flex-wrap items-center justify-center gap-8 text-sm text-white/40">
-        <span>✓ No credit card required</span>
+        <span>✓ Forex &amp; Crypto</span>
         <span>✓ Free Telegram alerts</span>
         <span>✓ Set up in 2 minutes</span>
+        <span>✓ No credit card</span>
       </div>
     </section>
   );

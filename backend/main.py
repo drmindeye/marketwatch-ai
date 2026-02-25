@@ -14,7 +14,10 @@ from api.telegram import router as telegram_router
 from api.alerts import router as alerts_router
 from api.market import router as market_router
 from api.referral import router as referral_router
+from api.profile import router as profile_router
+from api.admin import router as admin_router
 from services.worker import run_worker
+from services.reminder_worker import run_reminder_worker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,13 +26,16 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     worker_task = asyncio.create_task(run_worker())
-    logger.info("FMP background worker started")
+    reminder_task = asyncio.create_task(run_reminder_worker())
+    logger.info("FMP + reminder workers started")
     yield
-    worker_task.cancel()
-    try:
-        await worker_task
-    except asyncio.CancelledError:
-        logger.info("FMP background worker stopped")
+    for task in (worker_task, reminder_task):
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    logger.info("Background workers stopped")
 
 
 app = FastAPI(title="MarketWatch AI API", version="1.0.0", lifespan=lifespan)
@@ -58,6 +64,8 @@ app.include_router(telegram_router)
 app.include_router(alerts_router)
 app.include_router(market_router)
 app.include_router(referral_router)
+app.include_router(profile_router)
+app.include_router(admin_router)
 
 
 @app.get("/health")

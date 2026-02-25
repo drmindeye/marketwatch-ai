@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL!;
+
 interface Profile {
   full_name: string | null;
   email: string;
@@ -32,17 +34,17 @@ export default function SettingsPage() {
         .eq("id", session.user.id)
         .maybeSingle();
 
-      const profile = data ?? {
+      const p = data ?? {
         full_name: null,
         email: session.user.email ?? "",
         tier: "free",
         telegram_id: null,
         whatsapp: null,
       };
-      setProfile(profile);
-      setFullName(profile.full_name ?? "");
-      setTelegramId(profile.telegram_id ?? "");
-      setWhatsapp(profile.whatsapp ?? "");
+      setProfile(p);
+      setFullName(p.full_name ?? "");
+      setTelegramId(p.telegram_id ?? "");
+      setWhatsapp(p.whatsapp ?? "");
     }
     load();
   }, []);
@@ -56,19 +58,36 @@ export default function SettingsPage() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) return;
 
-    const { error } = await supabase
+    // Update full_name via Supabase directly
+    await supabase
       .from("profiles")
-      .update({
-        full_name: fullName,
-        telegram_id: telegramId || null,
-        whatsapp: whatsapp || null,
-      })
+      .update({ full_name: fullName })
       .eq("id", session.user.id);
 
-    if (error) {
-      setMessage({ type: "error", text: error.message });
+    // Link Telegram + WhatsApp via backend (sends Telegram confirmation)
+    const res = await fetch(`${BACKEND}/api/profile/link`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({
+        telegram_id: telegramId || null,
+        whatsapp: whatsapp || null,
+      }),
+    });
+
+    if (res.ok) {
+      setMessage({
+        type: "success",
+        text: telegramId
+          ? "Saved! Check Telegram — we sent you a confirmation message."
+          : "Profile updated successfully.",
+      });
+      setProfile((p) => p ? { ...p, telegram_id: telegramId || null, whatsapp: whatsapp || null } : p);
     } else {
-      setMessage({ type: "success", text: "Profile updated successfully." });
+      const err = await res.json().catch(() => ({}));
+      setMessage({ type: "error", text: err.detail ?? "Save failed." });
     }
     setSaving(false);
   }
@@ -76,6 +95,8 @@ export default function SettingsPage() {
   if (!profile) {
     return <p className="text-sm text-white/30">Loading...</p>;
   }
+
+  const isLinked = !!profile.telegram_id;
 
   return (
     <div className="max-w-lg">
@@ -100,9 +121,9 @@ export default function SettingsPage() {
         <div>
           <label className="mb-1.5 block text-xs text-white/50">Plan</label>
           <input
-            value={profile.tier}
+            value={profile.tier.toUpperCase()}
             disabled
-            className="w-full rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2.5 text-sm capitalize text-emerald-400 outline-none cursor-not-allowed"
+            className="w-full rounded-lg border border-white/5 bg-white/[0.03] px-3 py-2.5 text-sm text-emerald-400 outline-none cursor-not-allowed"
           />
         </div>
 
@@ -117,41 +138,51 @@ export default function SettingsPage() {
           />
         </div>
 
-        <div>
-          <label className="mb-1.5 block text-xs text-white/50">Telegram ID</label>
+        {/* Telegram — auto-link */}
+        <div className="rounded-xl border border-white/10 bg-white/5 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <label className="text-xs font-semibold text-white/70">Telegram ID</label>
+            {isLinked ? (
+              <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-400">
+                ✓ Linked
+              </span>
+            ) : (
+              <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-white/40">
+                Not linked
+              </span>
+            )}
+          </div>
           <input
             value={telegramId}
             onChange={(e) => setTelegramId(e.target.value)}
-            className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-500"
+            className="w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-500"
             placeholder="e.g. 123456789"
           />
-          <p className="mt-1.5 text-xs text-white/30">
-            Get your ID by sending /start to{" "}
-            <a
-              href="https://t.me/marketwatchai_bot"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-emerald-400 hover:underline"
-            >
-              @marketwatchai_bot
-            </a>
-          </p>
+          <div className="mt-2.5 space-y-1 text-xs text-white/40">
+            <p>
+              1. Open{" "}
+              <a href="https://t.me/marketwatchai_bot" target="_blank" rel="noopener noreferrer" className="text-emerald-400 hover:underline">
+                @marketwatchai_bot
+              </a>{" "}
+              and press <strong className="text-white/60">Start</strong>
+            </p>
+            <p>2. Type <code className="text-emerald-300">/id</code> — copy the number shown</p>
+            <p>3. Paste it above and save — you&apos;ll get a confirmation in Telegram instantly</p>
+          </div>
         </div>
 
+        {/* WhatsApp */}
         <div>
           <label className="mb-1.5 block text-xs text-white/50">
             WhatsApp Number{" "}
-            <span className="text-white/20">(PRO/Elite only)</span>
+            <span className="text-white/20">(Pro only)</span>
           </label>
           <input
             value={whatsapp}
             onChange={(e) => setWhatsapp(e.target.value)}
             className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white outline-none focus:border-emerald-500"
-            placeholder="e.g. 2348012345678 (with country code, no +)"
+            placeholder="e.g. 2348012345678 (country code, no +)"
           />
-          <p className="mt-1.5 text-xs text-white/30">
-            Include country code without + (e.g. 2348012345678 for Nigeria)
-          </p>
         </div>
 
         {message && (

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import PromoteForm from "./PromoteForm";
 
 interface TierCount {
   tier: string;
@@ -116,6 +117,12 @@ export default async function AdminPage() {
               );
             })}
           </div>
+        </div>
+
+        {/* Promote user */}
+        <div className="mb-8 rounded-2xl border border-white/10 bg-white/5 p-6">
+          <h2 className="mb-4 text-lg font-semibold">Promote User to Pro</h2>
+          <PromoteForm />
         </div>
 
         {/* Recent subscriptions */}

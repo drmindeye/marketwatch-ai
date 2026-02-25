@@ -1,35 +1,35 @@
 const faqs = [
   {
     q: "What exactly is a Zone Alert?",
-    a: "A Zone Alert lets you define a price range — a low and a high — instead of a single price level. When price enters that range from either direction, you get notified immediately. This is perfect for order blocks, supply/demand zones, and any S/R region where you don't know the exact pip price will react from.",
+    a: "A Zone Alert lets you define a price range — a low and a high — instead of a single price level. When price enters that range from either direction, you get notified immediately. Perfect for order blocks, supply/demand zones, and BTC/ETH key ranges where you don't know the exact level price will react from.",
   },
   {
-    q: "How do I set up the Telegram bot?",
-    a: "Sign up on the website, then open @marketwatchai_bot on Telegram and send the command: /link your@email.com — your account links instantly. From there you can create alerts, run the trade calculator, and chat with the AI, all without leaving Telegram.",
+    q: "Does this work for crypto, not just Forex?",
+    a: "Yes — fully. Set alerts on BTCUSD, ETHUSD, or any FMP-supported crypto asset just like you would on EURUSD. Zone alerts, AI context, session reminders, and correlation groups all work across Forex and crypto.",
+  },
+  {
+    q: "What are Session Reminders?",
+    a: "Session reminders ping you when a trading session opens — Asian at 00:00 UTC, London at 08:00 UTC, New York at 13:00 UTC. You can also set custom reminders: just tell the bot 'remind me at 9pm to check my BTCUSD trade' and it will. All via Telegram.",
+  },
+  {
+    q: "How do I set up the bot?",
+    a: "Two ways: (1) Sign up → go to Settings → enter your Telegram ID (from /id in the bot) → save. You'll get an instant confirmation in Telegram. Or (2) open @marketwatchai_bot and send /link your@email.com. That's it — fully linked in under a minute.",
   },
   {
     q: "What markets are supported?",
-    a: "Forex pairs (EURUSD, GBPUSD, USDJPY, etc.), crypto (BTCUSD, ETHUSD), gold (XAUUSD), and major commodities. Market data is powered by Financial Modeling Prep and refreshes every 30 seconds.",
+    a: "Forex pairs (EURUSD, GBPUSD, USDJPY, etc.), major crypto (BTCUSD, ETHUSD), gold (XAUUSD), and other FMP-supported assets. Data refreshes every 30 seconds.",
   },
   {
-    q: "How quickly do alerts fire after a level is hit?",
-    a: "The background engine polls live prices every 30 seconds. In most cases you'll be notified within 30 seconds of price touching or entering your level — fast enough for swing and intraday setups.",
+    q: "How quickly do alerts fire?",
+    a: "The background engine polls live prices every 30 seconds. In most cases you're notified within 30 seconds of price touching or entering your level — fast enough for swing and intraday setups on both Forex and crypto.",
   },
   {
     q: "What's the difference between Free and Pro?",
-    a: "Free gives you 1 trading pair and up to 2 alerts per day, delivered via Telegram. Pro unlocks unlimited pairs, unlimited daily alerts, Zone alerts, WhatsApp delivery, and AI market context attached to every alert.",
-  },
-  {
-    q: "Why is WhatsApp only available on Pro?",
-    a: "WhatsApp Business API charges per message sent. To keep the free tier sustainable for everyone, WhatsApp notifications are reserved for Pro members. Telegram is free, equally fast, and available on all plans.",
-  },
-  {
-    q: "Can I cancel my Pro subscription anytime?",
-    a: "Yes. Reach out to support and we'll cancel it immediately. Your Pro access stays active until the end of the current billing period — no partial refunds, no lock-in.",
+    a: "Free gives you 1 trading pair, 2 alerts per day, and Telegram notifications. Pro unlocks unlimited pairs and alerts, Zone alerts, WhatsApp delivery, correlation groups, unlimited AI chat, and session reminders.",
   },
   {
     q: "Is my payment secure?",
-    a: "All payments are handled by Paystack, one of Africa's leading payment processors. We verify every transaction with HMAC SHA512 signatures. Your card details are never stored on our servers.",
+    a: "All payments go through Paystack, Africa's leading payment processor. We verify every transaction with HMAC SHA512 signatures. Your card details are never stored on our servers.",
   },
 ];
 

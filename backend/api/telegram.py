@@ -2,7 +2,7 @@
 
 import asyncio
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any
 
 import httpx
@@ -17,7 +17,7 @@ from fastapi import APIRouter, Request
 from supabase import create_client
 
 from core.config import settings
-from services.ai import chat as ai_chat
+from services.ai import chat as ai_chat, parse_reminder
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/telegram", tags=["telegram"])
@@ -178,6 +178,45 @@ def _get_active_alert_symbols(user_id: str) -> set[str]:
         return set()
 
 
+def _get_reminders(user_id: str) -> list[dict]:
+    try:
+        r = (
+            _db().table("reminders")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("sent", False)
+            .order("remind_at", desc=False)
+            .execute()
+        )
+        return r.data or []
+    except Exception:
+        return []
+
+
+def _create_reminder(user_id: str, message: str, remind_at: str, session_type: str | None, is_recurring: bool) -> bool:
+    try:
+        _db().table("reminders").insert({
+            "user_id": user_id,
+            "message": message,
+            "remind_at": remind_at,
+            "session_type": session_type,
+            "is_recurring": is_recurring,
+            "sent": False,
+        }).execute()
+        return True
+    except Exception as e:
+        logger.error("Create reminder error: %s", e)
+        return False
+
+
+def _delete_reminder(reminder_id: str, user_id: str) -> bool:
+    try:
+        _db().table("reminders").delete().eq("id", reminder_id).eq("user_id", user_id).execute()
+        return True
+    except Exception:
+        return False
+
+
 def _get_platform_stats() -> dict:
     try:
         db = _db()
@@ -198,7 +237,11 @@ def _main_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🔔 Alerts", callback_data="menu_alerts"),
+            InlineKeyboardButton(text="⏰ Reminders", callback_data="menu_reminders"),
+        ],
+        [
             InlineKeyboardButton(text="🧮 Calculator", callback_data="menu_calc"),
+            InlineKeyboardButton(text="📊 Correlations", callback_data="menu_correlation"),
         ],
         [
             InlineKeyboardButton(text="📜 History", callback_data="menu_history"),
@@ -267,6 +310,32 @@ def _back_calc_kb() -> InlineKeyboardMarkup:
 
 def _back_main_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🏠 Main Menu", callback_data="menu_main")],
+    ])
+
+
+def _reminders_menu_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Set Reminder", callback_data="reminder_create")],
+        [InlineKeyboardButton(text="📋 My Reminders", callback_data="reminder_list")],
+        [InlineKeyboardButton(text="🗑 Delete Reminder", callback_data="reminder_delete")],
+        [InlineKeyboardButton(text="◀️ Main Menu", callback_data="menu_main")],
+    ])
+
+
+def _session_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🌏 Asian Session (00:00 UTC)", callback_data="session_asian")],
+        [InlineKeyboardButton(text="🇬🇧 London Session (08:00 UTC)", callback_data="session_london")],
+        [InlineKeyboardButton(text="🇺🇸 New York Session (13:00 UTC)", callback_data="session_new_york")],
+        [InlineKeyboardButton(text="✏️ Custom Time / AI Parse", callback_data="session_custom")],
+        [InlineKeyboardButton(text="❌ Cancel", callback_data="menu_reminders")],
+    ])
+
+
+def _back_reminders_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="◀️ Reminders", callback_data="menu_reminders")],
         [InlineKeyboardButton(text="🏠 Main Menu", callback_data="menu_main")],
     ])
 
@@ -386,6 +455,161 @@ async def _handle_callback(bot: Bot, cq: CallbackQuery) -> None:
             parse_mode="Markdown",
             reply_markup=_back_main_kb(),
         )
+
+    # ── Reminders menu
+    elif data == "menu_reminders":
+        _clear_state(tid)
+        await bot.send_message(
+            chat_id, "⏰ *Reminders*\nNever miss a session open or event.",
+            parse_mode="Markdown", reply_markup=_reminders_menu_kb(),
+        )
+
+    elif data == "reminder_create":
+        profile = await _require_linked(bot, chat_id, tid)
+        if not profile:
+            return
+        _set_state(tid, "reminder_type", {"user_id": profile["id"]})
+        await bot.send_message(
+            chat_id,
+            "⏰ *New Reminder*\n\nChoose a type:",
+            parse_mode="Markdown", reply_markup=_session_kb(),
+        )
+
+    elif data.startswith("session_"):
+        state = _get_state(tid)
+        if state["state"] != "reminder_type":
+            return
+        session = data[8:]  # asian / london / new_york / custom
+        user_id = state["data"]["user_id"]
+
+        if session == "custom":
+            _set_state(tid, "reminder_custom", {"user_id": user_id})
+            await bot.send_message(
+                chat_id,
+                "✏️ *Custom Reminder*\n\nTell me what to remind you and when.\n\n"
+                "_Examples:_\n"
+                "• `Remind me at 2am to attend the summit on X`\n"
+                "• `Remind me tomorrow at 9pm to review my trades`\n"
+                "• `Remind me every day at the London session to check EURUSD`",
+                parse_mode="Markdown",
+            )
+            return
+
+        # Session reminder
+        from services.reminder_worker import SESSION_TIMES
+        from datetime import timedelta
+        h, m = SESSION_TIMES[session]
+        now_utc = datetime.now(timezone.utc)
+        next_dt = now_utc.replace(hour=h, minute=m, second=0, microsecond=0)
+        if next_dt <= now_utc:
+            next_dt += timedelta(days=1)
+
+        labels = {"asian": "Asian 🌏", "london": "London 🇬🇧", "new_york": "New York 🇺🇸"}
+        msg = f"{labels[session]} session open — time to trade!"
+        ok = _create_reminder(user_id, msg, next_dt.isoformat(), session, is_recurring=True)
+        _clear_state(tid)
+        if ok:
+            await bot.send_message(
+                chat_id,
+                f"✅ *Reminder Set!*\n\n{labels[session]} session reminder created.\n"
+                f"I'll ping you daily at *{h:02d}:{m:02d} UTC*.",
+                parse_mode="Markdown", reply_markup=_back_reminders_kb(),
+            )
+        else:
+            await bot.send_message(chat_id, "❌ Could not set reminder.", reply_markup=_back_reminders_kb())
+
+    elif data == "reminder_list":
+        profile = await _require_linked(bot, chat_id, tid)
+        if not profile:
+            return
+        reminders = _get_reminders(profile["id"])
+        if not reminders:
+            await bot.send_message(chat_id, "📭 No active reminders.", reply_markup=_back_reminders_kb())
+            return
+        lines = ["📋 *Your Reminders*\n"]
+        for r in reminders:
+            dt = r["remind_at"][:16].replace("T", " ") + " UTC"
+            recurring = " (daily 🔁)" if r["is_recurring"] else ""
+            lines.append(f"⏰ {r['message'][:50]}\n   📅 {dt}{recurring}")
+        await bot.send_message(
+            chat_id, "\n\n".join(lines),
+            parse_mode="Markdown", reply_markup=_back_reminders_kb(),
+        )
+
+    elif data == "reminder_delete":
+        profile = await _require_linked(bot, chat_id, tid)
+        if not profile:
+            return
+        reminders = _get_reminders(profile["id"])
+        if not reminders:
+            await bot.send_message(chat_id, "📭 No reminders to delete.", reply_markup=_back_reminders_kb())
+            return
+        buttons = []
+        for r in reminders:
+            label = f"🗑 {r['message'][:40]}"
+            buttons.append([InlineKeyboardButton(text=label, callback_data=f"delrem_{r['id']}")])
+        buttons.append([InlineKeyboardButton(text="◀️ Back", callback_data="menu_reminders")])
+        await bot.send_message(
+            chat_id, "🗑 *Delete Reminder*\n\nTap one to delete:",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        )
+
+    elif data.startswith("delrem_"):
+        profile = await _require_linked(bot, chat_id, tid)
+        if not profile:
+            return
+        ok = _delete_reminder(data[7:], profile["id"])
+        msg = "✅ Reminder deleted." if ok else "❌ Could not delete reminder."
+        await bot.send_message(chat_id, msg, reply_markup=_back_reminders_kb())
+
+    # ── Correlation
+    elif data == "menu_correlation":
+        profile = await _require_linked(bot, chat_id, tid)
+        if not profile:
+            return
+        await bot.send_chat_action(chat_id=chat_id, action="typing")
+        try:
+            import httpx
+            groups = {
+                "Dollar Pairs 💵": ["EURUSD", "GBPUSD", "USDJPY", "USDCHF"],
+                "Safe Haven 🛡": ["XAUUSD", "USDJPY", "USDCHF", "BTCUSD"],
+                "Risk-On 📈": ["GBPJPY", "AUDUSD", "BTCUSD", "ETHUSD"],
+            }
+            all_symbols = list({s for g in groups.values() for s in g})
+            backend = settings.FRONTEND_URL.replace("feisty-happiness", "sweet-smile").replace("52e2", "e1c5")
+            # Use internal FMP fetch instead
+            from services.fmp import fetch_batch_quotes
+            quotes = await fetch_batch_quotes(all_symbols)
+
+            tier = profile.get("tier", "free")
+            group_items = list(groups.items())
+            if tier == "free":
+                group_items = group_items[:1]  # free: 1 group only
+
+            lines = ["📊 *Market Correlations*\n"]
+            for group_name, symbols in group_items:
+                lines.append(f"*{group_name}*")
+                for sym in symbols:
+                    q = quotes.get(sym)
+                    if q:
+                        chg = q.get("changesPercentage", 0)
+                        arrow = "📈" if chg >= 0 else "📉"
+                        lines.append(f"  {arrow} `{sym}` {q['price']:.5f} ({chg:+.2f}%)")
+                    else:
+                        lines.append(f"  • `{sym}` — N/A")
+                lines.append("")
+
+            if tier == "free":
+                lines.append("🔒 _Pro unlocks Safe Haven + Risk-On groups_\n/upgrade")
+
+            await bot.send_message(
+                chat_id, "\n".join(lines),
+                parse_mode="Markdown", reply_markup=_back_main_kb(),
+            )
+        except Exception as exc:
+            logger.error("Correlation fetch error: %s", exc)
+            await bot.send_message(chat_id, "⚠️ Could not fetch prices. Try again.", reply_markup=_back_main_kb())
 
     # ── Alerts
     elif data == "alert_create":
@@ -547,6 +771,8 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
             f"{linked_line}\n\n"
             "*📊 Features:*\n"
             "🔔 Price Alerts — Touch, Cross, Near & Zone\n"
+            "⏰ Reminders — Session opens + custom reminders\n"
+            "📊 Correlations — Live pair correlation groups\n"
             "🧮 Trade Calculator — Risk/Reward, Position Size, Pips\n"
             "📜 Alert History — All triggered alerts\n"
             "💬 AI Chat — Powered by DeepSeek AI\n"
@@ -556,6 +782,7 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
             "💎 *Pro* — Unlimited alerts & pairs, WhatsApp, Zone alerts\n\n"
             "*Commands:*\n"
             "/menu — Open main menu\n"
+            "/remind — Set a reminder\n"
             "/upgrade — View Pro plans & pricing\n"
             "/link email — Connect your account\n"
             "/id — Show your Telegram ID\n"
@@ -718,6 +945,7 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
             "🤖 *MarketWatch AI — Commands*\n\n"
             "/start — Welcome message & features\n"
             "/menu — Open main menu\n"
+            "/remind — Set a session or custom reminder\n"
             "/upgrade — View Pro plans & pricing\n"
             "/id — Show your Telegram ID\n"
             "/support — Contact support\n"
@@ -735,10 +963,127 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
         await bot.send_message(chat_id, "🗑 Chat history cleared.")
         return
 
+    if text.startswith("/promote"):
+        profile = _get_profile(tid)
+        if not profile or not profile.get("is_admin"):
+            await bot.send_message(chat_id, "⛔ Admin only.")
+            return
+        parts = text.split(maxsplit=1)
+        if len(parts) < 2:
+            await bot.send_message(chat_id, "Usage: /promote user@email.com")
+            return
+        identifier = parts[1].strip()
+        try:
+            db = _db()
+            # Find by email or id
+            r = db.table("profiles").select("id,email,tier").eq("email", identifier).maybe_single().execute()
+            if not r.data:
+                r = db.table("profiles").select("id,email,tier").eq("id", identifier).maybe_single().execute()
+            if not r.data:
+                await bot.send_message(chat_id, f"❌ No user found: {identifier}")
+                return
+            target = r.data
+            if target["tier"] == "pro":
+                await bot.send_message(chat_id, f"ℹ️ {target['email']} is already Pro.")
+                return
+            db.table("profiles").update({"tier": "pro"}).eq("id", target["id"]).execute()
+            db.table("subscriptions").insert({
+                "user_id": target["id"],
+                "paystack_ref": f"admin_grant_{target['id'][:8]}",
+                "plan": "pro",
+                "status": "active",
+                "amount": 0,
+                "currency": "NGN",
+            }).execute()
+            await bot.send_message(
+                chat_id,
+                f"✅ *{target['email']}* promoted to *Pro*.",
+                parse_mode="Markdown",
+            )
+        except Exception as exc:
+            logger.error("Promote error: %s", exc)
+            await bot.send_message(chat_id, "⚠️ Promote failed. Check logs.")
+        return
+
+    if text.startswith("/remind"):
+        profile = await _require_linked(bot, chat_id, tid)
+        if not profile:
+            return
+        parts = text.split(maxsplit=1)
+        if len(parts) < 2:
+            _set_state(tid, "reminder_type", {"user_id": profile["id"]})
+            await bot.send_message(
+                chat_id, "⏰ *Set a Reminder*\nChoose type:",
+                parse_mode="Markdown", reply_markup=_session_kb(),
+            )
+        else:
+            # Inline: /remind <natural language>
+            reminder_text = parts[1]
+            await bot.send_chat_action(chat_id=chat_id, action="typing")
+            now_utc = datetime.now(timezone.utc).isoformat()
+            parsed = await asyncio.to_thread(parse_reminder, reminder_text, now_utc)
+            if not parsed or not parsed.get("remind_at"):
+                await bot.send_message(
+                    chat_id,
+                    "❌ Couldn't parse that reminder. Try:\n`/remind me at 9pm to review my trades`",
+                    parse_mode="Markdown",
+                )
+                return
+            ok = _create_reminder(
+                profile["id"],
+                parsed.get("message", reminder_text),
+                parsed["remind_at"],
+                parsed.get("session_type"),
+                parsed.get("is_recurring", False),
+            )
+            if ok:
+                dt = parsed["remind_at"][:16].replace("T", " ")
+                await bot.send_message(
+                    chat_id,
+                    f"✅ *Reminder Set!*\n\n_{parsed.get('message', reminder_text)}_\n📅 {dt} UTC",
+                    parse_mode="Markdown", reply_markup=_back_main_kb(),
+                )
+            else:
+                await bot.send_message(chat_id, "❌ Failed to save reminder.")
+        return
+
     # ── State machine
     state = _get_state(tid)
     s = state["state"]
     d = state["data"]
+
+    # Custom reminder via AI parsing
+    if s == "reminder_custom":
+        user_id = d["user_id"]
+        await bot.send_chat_action(chat_id=chat_id, action="typing")
+        now_utc = datetime.now(timezone.utc).isoformat()
+        parsed = await asyncio.to_thread(parse_reminder, text, now_utc)
+        if not parsed or not parsed.get("remind_at"):
+            await bot.send_message(
+                chat_id,
+                "❌ Couldn't understand that. Try:\n`Remind me at 9pm to review my EURUSD trade`",
+                parse_mode="Markdown",
+            )
+            return
+        ok = _create_reminder(
+            user_id,
+            parsed.get("message", text),
+            parsed["remind_at"],
+            parsed.get("session_type"),
+            parsed.get("is_recurring", False),
+        )
+        _clear_state(tid)
+        if ok:
+            dt = parsed["remind_at"][:16].replace("T", " ")
+            recurring = " (recurring daily)" if parsed.get("is_recurring") else ""
+            await bot.send_message(
+                chat_id,
+                f"✅ *Reminder Set!*\n\n_{parsed.get('message', text)}_\n📅 {dt} UTC{recurring}",
+                parse_mode="Markdown", reply_markup=_back_reminders_kb(),
+            )
+        else:
+            await bot.send_message(chat_id, "❌ Failed to save reminder.", reply_markup=_back_reminders_kb())
+        return
 
     # Alert creation steps
     if s == "alert_symbol":
