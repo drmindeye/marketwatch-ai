@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node --version && npm --version && python --version 2>/dev/null || python3 --version 2>/dev/null)",
+      "Bash(cd /c/Users/\"Lenovo X360\"/marketwatch-ai && npx create-next-app@16 frontend --typescript --tailwind --app --eslint --no-src-dir --import-alias \"@/*\" --yes 2>&1)",
+      "Bash(tail:*)",
+      "Bash(grep:*)",
+      "Bash(cd:*)",
+      "Bash(cd /c/Users/\"Lenovo X360\"/marketwatch-ai/frontend && npx tsc --noEmit 2>&1)",
+      "Bash(curl:*)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "supabase"
+  ],
+  "enableAllProjectMcpServers": true
+}

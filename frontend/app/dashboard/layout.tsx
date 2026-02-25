@@ -6,8 +6,10 @@ import MobileNav from "@/components/dashboard/MobileNav";
 const NAV = [
   { href: "/dashboard", label: "Overview", icon: "📊" },
   { href: "/dashboard/alerts", label: "Alerts", icon: "🔔" },
+  { href: "/dashboard/correlation", label: "Correlation", icon: "🔗" },
   { href: "/dashboard/calculator", label: "Calculator", icon: "🧮" },
   { href: "/dashboard/history", label: "History", icon: "📜" },
+  { href: "/dashboard/referral", label: "Referral", icon: "🎁" },
   { href: "/dashboard/settings", label: "Settings", icon: "⚙️" },
 ];
 
@@ -22,12 +24,12 @@ export default async function DashboardLayout({
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, tier")
+    .select("full_name, tier, is_admin")
     .eq("id", session.user.id)
     .maybeSingle();
 
   const tier = profile?.tier ?? "free";
-  const isElite = tier === "elite";
+  const isAdmin = profile?.is_admin === true;
 
   return (
     <div className="flex min-h-screen bg-black text-white">
@@ -49,7 +51,7 @@ export default async function DashboardLayout({
             </Link>
           ))}
 
-          {isElite && (
+          {isAdmin && (
             <Link
               href="/dashboard/admin"
               className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-white/60 transition hover:bg-white/5 hover:text-white"
@@ -84,7 +86,7 @@ export default async function DashboardLayout({
         <MobileNav
           email={session.user.email ?? ""}
           tier={tier}
-          isElite={isElite}
+          isAdmin={isAdmin}
         />
 
         {/* Main content */}

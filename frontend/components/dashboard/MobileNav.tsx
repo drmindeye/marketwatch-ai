@@ -6,18 +6,20 @@ import Link from "next/link";
 const NAV = [
   { href: "/dashboard", label: "Overview", icon: "📊" },
   { href: "/dashboard/alerts", label: "Alerts", icon: "🔔" },
+  { href: "/dashboard/correlation", label: "Correlation", icon: "🔗" },
   { href: "/dashboard/calculator", label: "Calculator", icon: "🧮" },
   { href: "/dashboard/history", label: "History", icon: "📜" },
+  { href: "/dashboard/referral", label: "Referral", icon: "🎁" },
   { href: "/dashboard/settings", label: "Settings", icon: "⚙️" },
 ];
 
 interface Props {
   email: string;
   tier: string;
-  isElite: boolean;
+  isAdmin: boolean;
 }
 
-export default function MobileNav({ email, tier, isElite }: Props) {
+export default function MobileNav({ email, tier, isAdmin }: Props) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -79,7 +81,7 @@ export default function MobileNav({ email, tier, isElite }: Props) {
               {item.label}
             </Link>
           ))}
-          {isElite && (
+          {isAdmin && (
             <Link
               href="/dashboard/admin"
               onClick={() => setOpen(false)}

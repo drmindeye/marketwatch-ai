@@ -19,11 +19,11 @@ export default async function AdminPage() {
   // Only elite tier gets admin access
   const { data: profile } = await supabase
     .from("profiles")
-    .select("tier, full_name")
+    .select("is_admin, full_name")
     .eq("id", session.user.id)
     .single();
 
-  if (profile?.tier !== "elite") {
+  if (!profile?.is_admin) {
     redirect("/dashboard");
   }
 

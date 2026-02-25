@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     WHATSAPP_PHONE_NUMBER_ID: str = ""
     WHATSAPP_VERIFY_TOKEN: str = ""
     TELEGRAM_BOT_TOKEN: str = ""
+    FRONTEND_URL: str = "http://localhost:3000"
+    RESEND_API_KEY: str = ""
 
 
 settings = Settings()

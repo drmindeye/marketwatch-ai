@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 from services.ai import generate_alert_summary
+from services.email import send_alert_email
 from services.telegram_service import send_alert as telegram_send
 from services.whatsapp_service import send_alert_template as whatsapp_send
 
@@ -28,6 +29,7 @@ async def _notify_single(item: dict[str, Any]) -> None:
     tier: str = profile.get("tier", "free")
     telegram_id: str | None = profile.get("telegram_id")
     whatsapp: str | None = profile.get("whatsapp")
+    email: str | None = profile.get("email")
 
     # Generate AI summary (runs in thread to avoid blocking event loop)
     try:
@@ -53,7 +55,20 @@ async def _notify_single(item: dict[str, Any]) -> None:
             )
         )
     else:
-        logger.warning("No telegram_id for user — skipping Telegram alert")
+        # No Telegram and no WhatsApp — fall back to email
+        if not (tier in ("pro", "elite") and whatsapp) and email:
+            tasks.append(
+                send_alert_email(
+                    to=email,
+                    symbol=symbol,
+                    alert_type=alert_type,
+                    price=price,
+                    target=target,
+                    ai_summary=ai_summary,
+                )
+            )
+        else:
+            logger.warning("No telegram_id for user — skipping Telegram alert")
 
     # WhatsApp — PRO and Elite only
     if tier in ("pro", "elite") and whatsapp:

@@ -101,3 +101,19 @@ async def _handle_charge_success(event: PaystackEvent) -> None:
         plan,
         data.reference,
     )
+
+    # Credit referrer: increment their referral_count if this user was referred
+    try:
+        profile_full = (
+            supabase.table("profiles")
+            .select("referred_by")
+            .eq("id", user_id)
+            .single()
+            .execute()
+        )
+        referrer_id = (profile_full.data or {}).get("referred_by")
+        if referrer_id:
+            supabase.rpc("increment_referral_count", {"referrer_id": referrer_id}).execute()
+            logger.info("Referral credited to %s", referrer_id)
+    except Exception as exc:
+        logger.warning("Referral credit failed: %s", exc)
