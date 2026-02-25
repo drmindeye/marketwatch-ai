@@ -2,12 +2,14 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 
 export default function SignupPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const ref = searchParams.get("ref") ?? "";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [fullName, setFullName] = useState("");
@@ -20,12 +22,15 @@ export default function SignupPage() {
     setError(null);
 
     const supabase = createClient();
+    const callbackUrl = ref
+      ? `${location.origin}/auth/callback?ref=${encodeURIComponent(ref)}`
+      : `${location.origin}/auth/callback`;
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: { full_name: fullName },
-        emailRedirectTo: `${location.origin}/auth/callback`,
+        emailRedirectTo: callbackUrl,
       },
     });
 
