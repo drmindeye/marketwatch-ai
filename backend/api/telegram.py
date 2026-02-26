@@ -119,7 +119,7 @@ def _create_alert(
             "alert_type": alert_type,
             "price": price,
             "direction": direction,
-            "pip_buffer": pip_buffer,
+            "pip_buffer": pip_buffer if pip_buffer is not None else 5.0,
             "zone_high": zone_high,
         }).execute()
         return True
