@@ -941,6 +941,8 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
         return
 
     if text == "/help":
+        admin_profile = _get_profile(tid)
+        admin_line = "\n\n*Admin Commands*\n/promote — Promote a user to Pro" if (admin_profile and admin_profile.get("is_admin")) else ""
         await bot.send_message(
             chat_id,
             "🤖 *MarketWatch AI — Commands*\n\n"
@@ -953,7 +955,7 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
             "/link email — Link your MarketWatch account\n"
             "/setwhatsapp number — Save WhatsApp for alerts\n"
             "/clear — Clear AI chat history\n"
-            "/help — Show this message",
+            f"/help — Show this message{admin_line}",
             parse_mode="Markdown",
         )
         return
@@ -971,7 +973,17 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
             return
         parts = text.split(maxsplit=1)
         if len(parts) < 2:
-            await bot.send_message(chat_id, "Usage: /promote user@email.com")
+            # Interactive prompt — ask admin to send the identifier next
+            _set_state(tid, "promote_await_id")
+            await bot.send_message(
+                chat_id,
+                "👤 *Promote User to Pro*\n\nSend the user's:\n"
+                "• Email address\n"
+                "• Supabase UUID\n"
+                "• Referral code\n\n"
+                "Or /cancel to abort.",
+                parse_mode="Markdown",
+            )
             return
         identifier = parts[1].strip()
         try:
@@ -1340,6 +1352,72 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
             )
         except ValueError:
             await bot.send_message(chat_id, "❌ Enter a valid price:")
+        return
+
+    # Admin promote — awaiting identifier input
+    if s == "promote_await_id":
+        _clear_state(tid)
+        if text.startswith("/"):
+            await bot.send_message(chat_id, "❌ Promotion cancelled.")
+            return
+        identifier = text.strip()
+        # Run the same lookup + promote logic
+        import re as _re
+        _UUID_RE_P = _re.compile(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            _re.IGNORECASE,
+        )
+        try:
+            db = _db()
+            target = None
+            try:
+                r = db.table("profiles").select("id,email,tier").eq("email", identifier).maybe_single().execute()
+                if r.data:
+                    target = r.data
+            except Exception:
+                pass
+            if not target and _UUID_RE_P.match(identifier):
+                try:
+                    r = db.table("profiles").select("id,email,tier").eq("id", identifier).maybe_single().execute()
+                    if r.data:
+                        target = r.data
+                except Exception:
+                    pass
+            if not target:
+                try:
+                    r = db.table("profiles").select("id,email,tier").eq("referral_code", identifier.upper()).maybe_single().execute()
+                    if r.data:
+                        target = r.data
+                except Exception:
+                    pass
+            if not target:
+                await bot.send_message(chat_id, f"❌ No user found for: `{identifier}`\n\nCheck the email, UUID, or referral code and try `/promote` again.", parse_mode="Markdown")
+                return
+            if target["tier"] == "pro":
+                await bot.send_message(chat_id, f"ℹ️ *{target['email']}* is already Pro.", parse_mode="Markdown")
+                return
+            db.table("profiles").update({"tier": "pro"}).eq("id", target["id"]).execute()
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            try:
+                db.table("subscriptions").insert({
+                    "user_id": target["id"],
+                    "paystack_ref": f"admin_grant_{target['id'][:8]}_{ts}",
+                    "plan": "pro",
+                    "status": "active",
+                    "amount": 0,
+                    "currency": "NGN",
+                }).execute()
+            except Exception as sub_exc:
+                logger.warning("Subscription record insert failed (non-fatal): %s", sub_exc)
+            await bot.send_message(
+                chat_id,
+                f"✅ *{target['email']}* has been promoted to *Pro*.\n\n"
+                f"UUID: `{target['id']}`",
+                parse_mode="Markdown",
+            )
+        except Exception as exc:
+            logger.error("Promote (state) error: %s", exc, exc_info=True)
+            await bot.send_message(chat_id, f"⚠️ Promote failed: {type(exc).__name__}: {exc}")
         return
 
     # AI chat (chat_mode state or default fallback)
