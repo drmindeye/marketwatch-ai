@@ -988,14 +988,19 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
                 await bot.send_message(chat_id, f"ℹ️ {target['email']} is already Pro.")
                 return
             db.table("profiles").update({"tier": "pro"}).eq("id", target["id"]).execute()
-            db.table("subscriptions").insert({
-                "user_id": target["id"],
-                "paystack_ref": f"admin_grant_{target['id'][:8]}",
-                "plan": "pro",
-                "status": "active",
-                "amount": 0,
-                "currency": "NGN",
-            }).execute()
+            # Subscription record for history — non-fatal; use timestamp to ensure unique ref
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+            try:
+                db.table("subscriptions").insert({
+                    "user_id": target["id"],
+                    "paystack_ref": f"admin_grant_{target['id'][:8]}_{ts}",
+                    "plan": "pro",
+                    "status": "active",
+                    "amount": 0,
+                    "currency": "NGN",
+                }).execute()
+            except Exception as sub_exc:
+                logger.warning("Subscription record insert failed (non-fatal): %s", sub_exc)
             await bot.send_message(
                 chat_id,
                 f"✅ *{target['email']}* promoted to *Pro*.",

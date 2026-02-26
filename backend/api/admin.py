@@ -1,6 +1,7 @@
 """Admin endpoints — promote users, platform stats."""
 
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel
@@ -63,15 +64,20 @@ def promote_user(body: PromoteBody, authorization: str = Header(...)) -> dict:
 
     db.table("profiles").update({"tier": "pro"}).eq("id", target["id"]).execute()
 
-    # Insert a free subscription record so history is accurate
-    db.table("subscriptions").insert({
-        "user_id": target["id"],
-        "paystack_ref": f"admin_grant_{target['id'][:8]}",
-        "plan": "pro",
-        "status": "active",
-        "amount": 0,
-        "currency": "NGN",
-    }).execute()
+    # Insert subscription record for history — non-fatal if it fails
+    # (paystack_ref must be globally unique; use timestamp to avoid conflicts)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    try:
+        db.table("subscriptions").insert({
+            "user_id": target["id"],
+            "paystack_ref": f"admin_grant_{target['id'][:8]}_{ts}",
+            "plan": "pro",
+            "status": "active",
+            "amount": 0,
+            "currency": "NGN",
+        }).execute()
+    except Exception as sub_exc:
+        logger.warning("Subscription record insert failed (non-fatal): %s", sub_exc)
 
     logger.info("Admin promoted %s to Pro", target["email"])
     return {"ok": True, "message": f"{target['email']} promoted to Pro"}
