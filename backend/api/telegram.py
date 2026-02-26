@@ -128,6 +128,48 @@ def _create_alert(
         return False
 
 
+async def _run_promote(bot: Bot, chat_id: int, telegram_id: str) -> None:
+    """Promote a user to Pro by their Telegram ID."""
+    telegram_id = telegram_id.strip()
+    try:
+        db = _db()
+        r = db.table("profiles").select("id,email,tier").eq("telegram_id", telegram_id).maybe_single().execute()
+        if not r.data:
+            await bot.send_message(
+                chat_id,
+                f"❌ No linked account found for Telegram ID `{telegram_id}`.\n\n"
+                "The user must link their account first by sending /link to the bot.",
+                parse_mode="Markdown",
+            )
+            return
+        target = r.data
+        if target["tier"] == "pro":
+            await bot.send_message(chat_id, f"ℹ️ *{target['email']}* is already Pro.", parse_mode="Markdown")
+            return
+        db.table("profiles").update({"tier": "pro"}).eq("id", target["id"]).execute()
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        try:
+            db.table("subscriptions").insert({
+                "user_id": target["id"],
+                "paystack_ref": f"admin_grant_{target['id'][:8]}_{ts}",
+                "plan": "pro",
+                "status": "active",
+                "amount": 0,
+                "currency": "NGN",
+            }).execute()
+        except Exception as sub_exc:
+            logger.warning("Subscription record insert failed (non-fatal): %s", sub_exc)
+        logger.info("Admin promoted %s (tg=%s) to Pro", target["email"], telegram_id)
+        await bot.send_message(
+            chat_id,
+            f"✅ *{target['email']}* promoted to *Pro*!\n\nTelegram ID: `{telegram_id}`",
+            parse_mode="Markdown",
+        )
+    except Exception as exc:
+        logger.error("Promote error tg=%s: %s", telegram_id, exc, exc_info=True)
+        await bot.send_message(chat_id, f"⚠️ Promote failed: {type(exc).__name__}: {exc}")
+
+
 def _delete_alert(alert_id: str, user_id: str) -> bool:
     try:
         _db().table("alerts").delete().eq("id", alert_id).eq("user_id", user_id).execute()
@@ -973,78 +1015,18 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
             return
         parts = text.split(maxsplit=1)
         if len(parts) < 2:
-            # Interactive prompt — ask admin to send the identifier next
+            # Interactive prompt — ask admin to send the Telegram ID next
             _set_state(tid, "promote_await_id")
             await bot.send_message(
                 chat_id,
-                "👤 *Promote User to Pro*\n\nSend the user's:\n"
-                "• Email address\n"
-                "• Supabase UUID\n"
-                "• Referral code\n\n"
+                "👤 *Promote User to Pro*\n\n"
+                "Send the user's *Telegram ID* (numbers only).\n\n"
+                "They can get it by sending /id to the bot.\n\n"
                 "Or /cancel to abort.",
                 parse_mode="Markdown",
             )
             return
-        identifier = parts[1].strip()
-        try:
-            import re as _re
-            _UUID_RE = _re.compile(
-                r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-                _re.IGNORECASE,
-            )
-            db = _db()
-            target = None
-            # 1. Try by email
-            try:
-                r = db.table("profiles").select("id,email,tier").eq("email", identifier).maybe_single().execute()
-                if r.data:
-                    target = r.data
-            except Exception:
-                pass
-            # 2. Try by UUID
-            if not target and _UUID_RE.match(identifier):
-                try:
-                    r = db.table("profiles").select("id,email,tier").eq("id", identifier).maybe_single().execute()
-                    if r.data:
-                        target = r.data
-                except Exception:
-                    pass
-            # 3. Try by referral code
-            if not target:
-                try:
-                    r = db.table("profiles").select("id,email,tier").eq("referral_code", identifier.upper()).maybe_single().execute()
-                    if r.data:
-                        target = r.data
-                except Exception:
-                    pass
-            if not target:
-                await bot.send_message(chat_id, f"❌ No user found: `{identifier}`\n\nTry email, UUID, or referral code.", parse_mode="Markdown")
-                return
-            if target["tier"] == "pro":
-                await bot.send_message(chat_id, f"ℹ️ {target['email']} is already Pro.")
-                return
-            db.table("profiles").update({"tier": "pro"}).eq("id", target["id"]).execute()
-            # Subscription record for history — non-fatal; use timestamp to ensure unique ref
-            ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-            try:
-                db.table("subscriptions").insert({
-                    "user_id": target["id"],
-                    "paystack_ref": f"admin_grant_{target['id'][:8]}_{ts}",
-                    "plan": "pro",
-                    "status": "active",
-                    "amount": 0,
-                    "currency": "NGN",
-                }).execute()
-            except Exception as sub_exc:
-                logger.warning("Subscription record insert failed (non-fatal): %s", sub_exc)
-            await bot.send_message(
-                chat_id,
-                f"✅ *{target['email']}* promoted to *Pro*.",
-                parse_mode="Markdown",
-            )
-        except Exception as exc:
-            logger.error("Promote error: %s", exc, exc_info=True)
-            await bot.send_message(chat_id, f"⚠️ Promote failed: {type(exc).__name__}: {exc}")
+        await _run_promote(bot, chat_id, parts[1].strip())
         return
 
     if text.startswith("/remind"):
@@ -1354,70 +1336,13 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
             await bot.send_message(chat_id, "❌ Enter a valid price:")
         return
 
-    # Admin promote — awaiting identifier input
+    # Admin promote — awaiting Telegram ID input
     if s == "promote_await_id":
         _clear_state(tid)
         if text.startswith("/"):
             await bot.send_message(chat_id, "❌ Promotion cancelled.")
             return
-        identifier = text.strip()
-        # Run the same lookup + promote logic
-        import re as _re
-        _UUID_RE_P = _re.compile(
-            r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-            _re.IGNORECASE,
-        )
-        try:
-            db = _db()
-            target = None
-            try:
-                r = db.table("profiles").select("id,email,tier").eq("email", identifier).maybe_single().execute()
-                if r.data:
-                    target = r.data
-            except Exception:
-                pass
-            if not target and _UUID_RE_P.match(identifier):
-                try:
-                    r = db.table("profiles").select("id,email,tier").eq("id", identifier).maybe_single().execute()
-                    if r.data:
-                        target = r.data
-                except Exception:
-                    pass
-            if not target:
-                try:
-                    r = db.table("profiles").select("id,email,tier").eq("referral_code", identifier.upper()).maybe_single().execute()
-                    if r.data:
-                        target = r.data
-                except Exception:
-                    pass
-            if not target:
-                await bot.send_message(chat_id, f"❌ No user found for: `{identifier}`\n\nCheck the email, UUID, or referral code and try `/promote` again.", parse_mode="Markdown")
-                return
-            if target["tier"] == "pro":
-                await bot.send_message(chat_id, f"ℹ️ *{target['email']}* is already Pro.", parse_mode="Markdown")
-                return
-            db.table("profiles").update({"tier": "pro"}).eq("id", target["id"]).execute()
-            ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-            try:
-                db.table("subscriptions").insert({
-                    "user_id": target["id"],
-                    "paystack_ref": f"admin_grant_{target['id'][:8]}_{ts}",
-                    "plan": "pro",
-                    "status": "active",
-                    "amount": 0,
-                    "currency": "NGN",
-                }).execute()
-            except Exception as sub_exc:
-                logger.warning("Subscription record insert failed (non-fatal): %s", sub_exc)
-            await bot.send_message(
-                chat_id,
-                f"✅ *{target['email']}* has been promoted to *Pro*.\n\n"
-                f"UUID: `{target['id']}`",
-                parse_mode="Markdown",
-            )
-        except Exception as exc:
-            logger.error("Promote (state) error: %s", exc, exc_info=True)
-            await bot.send_message(chat_id, f"⚠️ Promote failed: {type(exc).__name__}: {exc}")
+        await _run_promote(bot, chat_id, text)
         return
 
     # AI chat (chat_mode state or default fallback)
