@@ -12,7 +12,7 @@ from typing import Any
 
 from services.ai import generate_alert_summary
 from services.email import send_alert_email
-from services.telegram_service import send_alert as telegram_send
+from services.telegram_service import send_alert as telegram_send, send_correlation_alert
 from services.whatsapp_service import send_alert_template as whatsapp_send
 
 logger = logging.getLogger(__name__)
@@ -105,3 +105,32 @@ async def dispatch_notifications(notifications: list[dict[str, Any]]) -> None:
     if not notifications:
         return
     await asyncio.gather(*[_notify_single(n) for n in notifications])
+
+
+async def dispatch_correlation_notifications(notifications: list[dict[str, Any]]) -> None:
+    """Dispatch all triggered correlation zone alerts."""
+    if not notifications:
+        return
+
+    async def _notify_correlation(item: dict[str, Any]) -> None:
+        alert = item["alert"]
+        triggered_by: str = item["symbol"]
+        price: float = item["price"]
+        profile: dict[str, Any] = alert.get("profiles") or {}
+        telegram_id: str | None = profile.get("telegram_id")
+
+        if not telegram_id:
+            logger.warning("No telegram_id for correlation alert user %s", alert.get("user_id"))
+            return
+
+        await send_correlation_alert(
+            telegram_id=telegram_id,
+            symbol1=alert["symbol1"],
+            symbol2=alert["symbol2"],
+            triggered_by=triggered_by,
+            price=price,
+            zone_low=float(alert["zone_low"]),
+            zone_high=float(alert["zone_high"]),
+        )
+
+    await asyncio.gather(*[_notify_correlation(n) for n in notifications], return_exceptions=True)

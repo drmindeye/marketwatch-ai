@@ -186,6 +186,45 @@ async def _run_promote(bot: Bot, chat_id: int, telegram_id: str) -> None:
         await bot.send_message(chat_id, f"⚠️ Promote failed: {type(exc).__name__}: {exc}")
 
 
+def _create_correlation_alert(user_id: str, sym1: str, sym2: str, zone_low: float, zone_high: float) -> bool:
+    try:
+        _db().table("correlation_alerts").insert({
+            "user_id": user_id,
+            "symbol1": sym1.upper(),
+            "symbol2": sym2.upper(),
+            "zone_low": zone_low,
+            "zone_high": zone_high,
+        }).execute()
+        return True
+    except Exception as e:
+        logger.error("Create correlation alert error: %s", e)
+        return False
+
+
+def _get_correlation_alerts(user_id: str) -> list[dict]:
+    try:
+        r = (
+            _db().table("correlation_alerts")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .is_("triggered_at", "null")
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return r.data or []
+    except Exception:
+        return []
+
+
+def _delete_correlation_alert(alert_id: str, user_id: str) -> bool:
+    try:
+        _db().table("correlation_alerts").delete().eq("id", alert_id).eq("user_id", user_id).execute()
+        return True
+    except Exception:
+        return False
+
+
 def _delete_alert(alert_id: str, user_id: str) -> bool:
     try:
         _db().table("alerts").delete().eq("id", alert_id).eq("user_id", user_id).execute()
@@ -309,6 +348,20 @@ def _main_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="💬 AI Chat", callback_data="menu_chat")],
         [InlineKeyboardButton(text="💎 Upgrade to Pro", callback_data="menu_upgrade")],
     ])
+
+
+def _correlation_kb(tier: str) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(text="ℹ️ How does it work?", callback_data="corr_howto")],
+        [InlineKeyboardButton(text="📊 Live Pair Prices", callback_data="corr_live")],
+    ]
+    if tier in ("pro", "elite"):
+        buttons.append([InlineKeyboardButton(text="🔗 Set Correlation Alert", callback_data="corr_set")])
+        buttons.append([InlineKeyboardButton(text="📋 My Correlation Alerts", callback_data="corr_my_alerts")])
+    else:
+        buttons.append([InlineKeyboardButton(text="💎 Pro — Set Alerts", callback_data="menu_upgrade")])
+    buttons.append([InlineKeyboardButton(text="◀️ Main Menu", callback_data="menu_main")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def _alerts_menu_kb() -> InlineKeyboardMarkup:
@@ -505,7 +558,7 @@ async def _handle_callback(bot: Bot, cq: CallbackQuery) -> None:
             "• Unlimited price alerts\n"
             "• Unlimited trading pairs\n"
             "• WhatsApp alert notifications\n"
-            "• Zone & correlation alerts\n"
+            "• Zone alerts\n"
             "• Unlimited AI chat\n\n"
             "*💰 Pricing:*\n"
             "• Weekly: ₦2,000\n"
@@ -622,34 +675,66 @@ async def _handle_callback(bot: Bot, cq: CallbackQuery) -> None:
         msg = "✅ Reminder deleted." if ok else "❌ Could not delete reminder."
         await bot.send_message(chat_id, msg, reply_markup=_back_reminders_kb())
 
-    # ── Correlation
+    # ── Correlations (standalone feature)
     elif data == "menu_correlation":
+        profile = await _require_linked(bot, chat_id, tid)
+        if not profile:
+            return
+        tier = profile.get("tier", "free")
+        await bot.send_message(
+            chat_id,
+            "🔗 *Correlation Zone Alerts*\n\n"
+            "Watch two currency pairs at once — get alerted the moment *either* "
+            "enters a price zone you define.\n\n"
+            "Useful for:\n"
+            "• Catching breakouts early across correlated pairs\n"
+            "• Confirming moves (e.g. EURUSD + GBPUSD both react to USD news)\n"
+            "• Spotting divergence when one pair lags behind\n\n"
+            "Select an option below:",
+            parse_mode="Markdown",
+            reply_markup=_correlation_kb(tier),
+        )
+
+    elif data == "corr_howto":
+        await bot.send_message(
+            chat_id,
+            "📊 *How Correlation Alerts Work*\n\n"
+            "Many forex pairs move together because they share a common currency "
+            "or react to the same economic events.\n\n"
+            "*Example:* EURUSD and GBPUSD both tend to fall when the US Dollar strengthens.\n\n"
+            "*How to use this feature:*\n"
+            "1️⃣ Pick two pairs to monitor (e.g. EURUSD + GBPUSD)\n"
+            "2️⃣ Set a price zone — a low and a high boundary\n"
+            "3️⃣ The bot watches *both* pairs 24/7\n"
+            "4️⃣ The moment *either* pair enters your zone (from above or below) "
+            "you get an instant alert showing which pair hit first\n\n"
+            "This lets you trade the *faster* of the two pairs and watch the "
+            "other for confirmation.",
+            parse_mode="Markdown",
+            reply_markup=_correlation_kb(
+                (_get_profile(tid) or {}).get("tier", "free")
+            ),
+        )
+
+    elif data == "corr_live":
         profile = await _require_linked(bot, chat_id, tid)
         if not profile:
             return
         await bot.send_chat_action(chat_id=chat_id, action="typing")
         try:
-            import httpx
             groups = {
                 "Dollar Pairs 💵": ["EURUSD", "GBPUSD", "USDJPY", "USDCHF"],
                 "Safe Haven 🛡": ["XAUUSD", "USDJPY", "USDCHF", "BTCUSD"],
                 "Risk-On 📈": ["GBPJPY", "AUDUSD", "BTCUSD", "ETHUSD"],
             }
             all_symbols = list({s for g in groups.values() for s in g})
-            backend = settings.FRONTEND_URL.replace("feisty-happiness", "sweet-smile").replace("52e2", "e1c5")
-            # Use internal FMP fetch instead
-            from services.fmp import fetch_batch_quotes
             quotes = await fetch_batch_quotes(all_symbols)
-
             tier = profile.get("tier", "free")
-            group_items = list(groups.items())
-            if tier == "free":
-                group_items = group_items[:1]  # free: 1 group only
-
-            lines = ["📊 *Market Correlations*\n"]
-            for group_name, symbols in group_items:
+            group_items = list(groups.items()) if tier in ("pro", "elite") else list(groups.items())[:1]
+            lines = ["📊 *Live Correlated Pairs*\n"]
+            for group_name, syms in group_items:
                 lines.append(f"*{group_name}*")
-                for sym in symbols:
+                for sym in syms:
                     q = quotes.get(sym)
                     if q:
                         chg = q.get("changesPercentage", 0)
@@ -658,17 +743,88 @@ async def _handle_callback(bot: Bot, cq: CallbackQuery) -> None:
                     else:
                         lines.append(f"  • `{sym}` — N/A")
                 lines.append("")
-
             if tier == "free":
-                lines.append("🔒 _Pro unlocks Safe Haven + Risk-On groups_\n/upgrade")
-
+                lines.append("🔒 _Pro unlocks Safe Haven + Risk-On groups_")
             await bot.send_message(
                 chat_id, "\n".join(lines),
-                parse_mode="Markdown", reply_markup=_back_main_kb(),
+                parse_mode="Markdown", reply_markup=_correlation_kb(tier),
             )
         except Exception as exc:
-            logger.error("Correlation fetch error: %s", exc)
+            logger.error("Correlation live prices error: %s", exc)
             await bot.send_message(chat_id, "⚠️ Could not fetch prices. Try again.", reply_markup=_back_main_kb())
+
+    elif data == "corr_set":
+        profile = await _require_linked(bot, chat_id, tid)
+        if not profile:
+            return
+        if profile.get("tier", "free") not in ("pro", "elite"):
+            await bot.send_message(
+                chat_id,
+                "🔒 *Correlation alerts are a Pro feature.*\n\nUpgrade to set alerts on correlated pairs.",
+                parse_mode="Markdown", reply_markup=_correlation_kb("free"),
+            )
+            return
+        _set_state(tid, "corr_sym1", {"user_id": profile["id"]})
+        await bot.send_message(
+            chat_id,
+            "🔗 *Correlation Alert — Step 1/4*\n\n"
+            "Enter the *first* pair to monitor:\n_(e.g. EURUSD, GBPUSD, XAUUSD)_",
+            parse_mode="Markdown",
+        )
+
+    elif data == "corr_my_alerts":
+        profile = await _require_linked(bot, chat_id, tid)
+        if not profile:
+            return
+        alerts = _get_correlation_alerts(profile["id"])
+        if not alerts:
+            await bot.send_message(
+                chat_id, "📭 No active correlation alerts.",
+                reply_markup=_correlation_kb(profile.get("tier", "free")),
+            )
+            return
+        lines = ["🔗 *Your Correlation Alerts*\n"]
+        for a in alerts:
+            lines.append(
+                f"• `{a['symbol1']}` / `{a['symbol2']}` "
+                f"zone `{float(a['zone_low']):.5f}` — `{float(a['zone_high']):.5f}`"
+            )
+        buttons = [[InlineKeyboardButton(text="🗑 Delete an alert", callback_data="corr_delete")]]
+        buttons.append([InlineKeyboardButton(text="◀️ Back", callback_data="menu_correlation")])
+        await bot.send_message(
+            chat_id, "\n".join(lines),
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        )
+
+    elif data == "corr_delete":
+        profile = await _require_linked(bot, chat_id, tid)
+        if not profile:
+            return
+        alerts = _get_correlation_alerts(profile["id"])
+        if not alerts:
+            await bot.send_message(chat_id, "📭 No correlation alerts to delete.",
+                                   reply_markup=_correlation_kb(profile.get("tier", "free")))
+            return
+        buttons = []
+        for a in alerts:
+            label = f"🗑 {a['symbol1']}/{a['symbol2']} zone {float(a['zone_low']):.5f}–{float(a['zone_high']):.5f}"
+            buttons.append([InlineKeyboardButton(text=label, callback_data=f"cdel_{a['id']}")])
+        buttons.append([InlineKeyboardButton(text="◀️ Back", callback_data="corr_my_alerts")])
+        await bot.send_message(
+            chat_id, "🗑 *Delete Correlation Alert*\n\nTap one to delete it:",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+        )
+
+    elif data.startswith("cdel_"):
+        profile = await _require_linked(bot, chat_id, tid)
+        if not profile:
+            return
+        ok = _delete_correlation_alert(data[5:], profile["id"])
+        msg = "✅ Correlation alert deleted." if ok else "❌ Could not delete."
+        await bot.send_message(chat_id, msg,
+                               reply_markup=_correlation_kb(profile.get("tier", "free")))
 
     # ── Alerts
     elif data == "alert_create":
@@ -751,7 +907,7 @@ async def _handle_callback(bot: Bot, cq: CallbackQuery) -> None:
             await bot.send_message(
                 chat_id,
                 "🔒 *Zone alerts are a Pro feature.*\n\n"
-                "Upgrade to unlock Zone & correlation alerts.\n/upgrade",
+                "Upgrade to unlock Zone alerts.\n/upgrade",
                 parse_mode="Markdown", reply_markup=_back_alerts_kb(),
             )
             _clear_state(tid)
@@ -872,7 +1028,7 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
             "• Unlimited price alerts\n"
             "• Unlimited trading pairs\n"
             "• WhatsApp alert notifications\n"
-            "• Zone & correlation alerts\n"
+            "• Zone alerts\n"
             "• Unlimited AI chat\n\n"
             "*💰 Pricing:*\n"
             "• Weekly: ₦2,000\n"
@@ -1350,6 +1506,77 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
             )
         except ValueError:
             await bot.send_message(chat_id, "❌ Enter a valid price:")
+        return
+
+    # ── Correlation alert creation states
+    if s == "corr_sym1":
+        sym = text.upper().replace("/", "").replace("-", "").replace(" ", "")
+        if len(sym) < 3:
+            await bot.send_message(chat_id, "❌ Invalid symbol. Enter something like EURUSD:")
+            return
+        _set_state(tid, "corr_sym2", {**d, "sym1": sym})
+        await bot.send_message(
+            chat_id,
+            f"✅ Pair 1: *{sym}*\n\n*Step 2/4* — Enter the *second* pair to monitor:\n_(e.g. GBPUSD)_",
+            parse_mode="Markdown",
+        )
+        return
+
+    if s == "corr_sym2":
+        sym = text.upper().replace("/", "").replace("-", "").replace(" ", "")
+        if len(sym) < 3:
+            await bot.send_message(chat_id, "❌ Invalid symbol. Enter something like GBPUSD:")
+            return
+        if sym == d.get("sym1"):
+            await bot.send_message(chat_id, "❌ The two pairs must be different. Enter a different symbol:")
+            return
+        _set_state(tid, "corr_zone_low", {**d, "sym2": sym})
+        await bot.send_message(
+            chat_id,
+            f"✅ Pair 1: *{d['sym1']}* | Pair 2: *{sym}*\n\n"
+            "*Step 3/4* — Enter the zone *low* (lower price boundary):\n_(e.g. 1.08000)_",
+            parse_mode="Markdown",
+        )
+        return
+
+    if s == "corr_zone_low":
+        try:
+            zone_low = float(text)
+        except ValueError:
+            await bot.send_message(chat_id, "❌ Enter a valid price number (e.g. 1.08000):")
+            return
+        _set_state(tid, "corr_zone_high", {**d, "zone_low": zone_low})
+        await bot.send_message(
+            chat_id,
+            f"Zone low: `{zone_low}`\n\n*Step 4/4* — Enter the zone *high* (upper price boundary):\n_(e.g. 1.09000)_",
+            parse_mode="Markdown",
+        )
+        return
+
+    if s == "corr_zone_high":
+        try:
+            zone_high = float(text)
+        except ValueError:
+            await bot.send_message(chat_id, "❌ Enter a valid price number (e.g. 1.09000):")
+            return
+        zone_low = d.get("zone_low", 0)
+        if zone_high <= zone_low:
+            await bot.send_message(chat_id, f"❌ Zone high must be above zone low ({zone_low}). Enter a higher price:")
+            return
+        ok = _create_correlation_alert(d["user_id"], d["sym1"], d["sym2"], zone_low, zone_high)
+        _clear_state(tid)
+        if ok:
+            await bot.send_message(
+                chat_id,
+                f"✅ *Correlation Alert Created!*\n\n"
+                f"🔗 Monitoring *{d['sym1']}* / *{d['sym2']}*\n"
+                f"📦 Zone: `{zone_low:.5f}` — `{zone_high:.5f}`\n\n"
+                f"You'll be alerted the moment either pair enters this zone.",
+                parse_mode="Markdown",
+                reply_markup=_correlation_kb("pro"),
+            )
+        else:
+            await bot.send_message(chat_id, "❌ Failed to create alert. Try again.")
         return
 
     # Admin promote — awaiting Telegram ID input

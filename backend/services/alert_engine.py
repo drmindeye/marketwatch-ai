@@ -158,3 +158,80 @@ async def check_alerts(
 
     from services.notifier import dispatch_notifications
     await dispatch_notifications(notifications)
+
+
+async def check_correlation_alerts(
+    quotes: dict[str, dict[str, Any]],
+    prev_quotes: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    """Check active correlation zone alerts — fires when either pair enters the zone."""
+    supabase = create_client(settings.SUPABASE_URL, settings.SUPABASE_SERVICE_KEY)
+
+    result = (
+        supabase.table("correlation_alerts")
+        .select("*, profiles(tier, telegram_id, whatsapp, email)")
+        .eq("is_active", True)
+        .is_("triggered_at", "null")
+        .execute()
+    )
+    if not result.data:
+        return
+
+    triggered_ids: list[str] = []
+    updates: list[tuple[str, str]] = []  # (id, triggered_by)
+    notifications: list[dict[str, Any]] = []
+
+    for alert in result.data:
+        sym1: str = alert["symbol1"]
+        sym2: str = alert["symbol2"]
+        zone_low: float = float(alert["zone_low"])
+        zone_high: float = float(alert["zone_high"])
+
+        triggered_by: str | None = None
+        triggered_price: float | None = None
+
+        for sym in (sym1, sym2):
+            q = quotes.get(sym)
+            if not q:
+                continue
+            price = float(q.get("price", 0))
+            if price <= 0:
+                continue
+            prev_price: float | None = None
+            if prev_quotes and sym in prev_quotes:
+                prev_price = float(prev_quotes[sym].get("price", 0)) or None
+
+            in_zone = zone_low <= price <= zone_high
+            crossed = prev_price is not None and (
+                (prev_price < zone_low <= price) or
+                (prev_price > zone_high >= price)
+            )
+            if in_zone or crossed:
+                triggered_by = sym
+                triggered_price = price
+                break
+
+        if triggered_by and triggered_price is not None:
+            triggered_ids.append(alert["id"])
+            updates.append((alert["id"], triggered_by))
+            notifications.append({
+                "alert": alert,
+                "symbol": triggered_by,
+                "price": triggered_price,
+            })
+            logger.info(
+                "CORRELATION TRIGGERED: %s/%s zone [%.5f-%.5f] — %s @ %.5f",
+                sym1, sym2, zone_low, zone_high, triggered_by, triggered_price,
+            )
+
+    if not triggered_ids:
+        return
+
+    now = datetime.now(timezone.utc).isoformat()
+    for alert_id, trig_sym in updates:
+        supabase.table("correlation_alerts").update(
+            {"triggered_at": now, "is_active": False, "triggered_by": trig_sym}
+        ).eq("id", alert_id).execute()
+
+    from services.notifier import dispatch_correlation_notifications
+    await dispatch_correlation_notifications(notifications)
