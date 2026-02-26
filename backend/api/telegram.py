@@ -975,15 +975,39 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
             return
         identifier = parts[1].strip()
         try:
+            import re as _re
+            _UUID_RE = _re.compile(
+                r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                _re.IGNORECASE,
+            )
             db = _db()
-            # Find by email or id
-            r = db.table("profiles").select("id,email,tier").eq("email", identifier).maybe_single().execute()
-            if not r.data:
-                r = db.table("profiles").select("id,email,tier").eq("id", identifier).maybe_single().execute()
-            if not r.data:
-                await bot.send_message(chat_id, f"❌ No user found: {identifier}")
+            target = None
+            # 1. Try by email
+            try:
+                r = db.table("profiles").select("id,email,tier").eq("email", identifier).maybe_single().execute()
+                if r.data:
+                    target = r.data
+            except Exception:
+                pass
+            # 2. Try by UUID
+            if not target and _UUID_RE.match(identifier):
+                try:
+                    r = db.table("profiles").select("id,email,tier").eq("id", identifier).maybe_single().execute()
+                    if r.data:
+                        target = r.data
+                except Exception:
+                    pass
+            # 3. Try by referral code
+            if not target:
+                try:
+                    r = db.table("profiles").select("id,email,tier").eq("referral_code", identifier.upper()).maybe_single().execute()
+                    if r.data:
+                        target = r.data
+                except Exception:
+                    pass
+            if not target:
+                await bot.send_message(chat_id, f"❌ No user found: `{identifier}`\n\nTry email, UUID, or referral code.", parse_mode="Markdown")
                 return
-            target = r.data
             if target["tier"] == "pro":
                 await bot.send_message(chat_id, f"ℹ️ {target['email']} is already Pro.")
                 return
@@ -1007,8 +1031,8 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
                 parse_mode="Markdown",
             )
         except Exception as exc:
-            logger.error("Promote error: %s", exc)
-            await bot.send_message(chat_id, "⚠️ Promote failed. Check logs.")
+            logger.error("Promote error: %s", exc, exc_info=True)
+            await bot.send_message(chat_id, f"⚠️ Promote failed: {type(exc).__name__}: {exc}")
         return
 
     if text.startswith("/remind"):
