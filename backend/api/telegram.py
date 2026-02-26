@@ -160,6 +160,22 @@ async def _run_promote(bot: Bot, chat_id: int, telegram_id: str) -> None:
         except Exception as sub_exc:
             logger.warning("Subscription record insert failed (non-fatal): %s", sub_exc)
         logger.info("Admin promoted %s (tg=%s) to Pro", target["email"], telegram_id)
+        # Notify the promoted user
+        try:
+            await bot.send_message(
+                int(telegram_id),
+                "🎉 *You've been upgraded to Pro!*\n\n"
+                "You now have access to:\n"
+                "• Unlimited alerts on any pair\n"
+                "• Zone alerts\n"
+                "• Unlimited AI market chat\n"
+                "• WhatsApp notifications\n\n"
+                "Use /menu to get started. Happy trading! 🚀",
+                parse_mode="Markdown",
+            )
+        except Exception as notify_exc:
+            logger.warning("Could not notify promoted user tg=%s: %s", telegram_id, notify_exc)
+        # Confirm to admin
         await bot.send_message(
             chat_id,
             f"✅ *{target['email']}* promoted to *Pro*!\n\nTelegram ID: `{telegram_id}`",
