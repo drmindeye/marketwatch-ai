@@ -17,7 +17,8 @@ from fastapi import APIRouter, Request
 from supabase import create_client
 
 from core.config import settings
-from services.ai import chat as ai_chat, parse_reminder
+from services.ai import chat as ai_chat, parse_reminder, detect_symbol
+from services.fmp import fetch_batch_quotes
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/telegram", tags=["telegram"])
@@ -1332,14 +1333,35 @@ async def _handle_text(bot: Bot, chat_id: int, text: str, first_name: str | None
     _chat_history[tid] = history
     await bot.send_chat_action(chat_id=chat_id, action="typing")
 
+    # Detect symbol → fetch live price → inject as context so AI gives relevant zones
+    price_context: str | None = None
+    symbol = detect_symbol(text)
+    if symbol:
+        try:
+            quotes = await fetch_batch_quotes([symbol])
+            q = quotes.get(symbol)
+            if q:
+                price = q.get("price", 0)
+                chg = q.get("changesPercentage", 0)
+                price_context = (
+                    f"{symbol} live price: {price} ({chg:+.2f}% today)\n"
+                    f"Base ALL zones and levels on this exact current price."
+                )
+        except Exception as exc:
+            logger.warning("Price fetch for AI context failed (%s): %s", symbol, exc)
+
     try:
-        reply = await asyncio.to_thread(ai_chat, history)
+        reply = await asyncio.to_thread(ai_chat, history, price_context)
         history.append({"role": "assistant", "content": reply})
         _chat_history[tid] = history[-20:]
-        await bot.send_message(chat_id, reply)
+        await bot.send_message(chat_id, reply, parse_mode="Markdown")
     except Exception as exc:
         logger.error("AI chat error: %s", exc)
-        await bot.send_message(chat_id, "⚠️ AI is temporarily unavailable. Please try again shortly.")
+        # Retry without Markdown parse mode in case of formatting issues
+        try:
+            await bot.send_message(chat_id, reply)
+        except Exception:
+            await bot.send_message(chat_id, "⚠️ AI is temporarily unavailable. Please try again shortly.")
 
 
 # ── Webhook endpoint ──────────────────────────────────────────────────────────
