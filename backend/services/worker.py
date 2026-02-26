@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from typing import Any
 
 from supabase import create_client
 
@@ -33,6 +34,9 @@ async def run_worker() -> None:
     """Main polling loop — runs for the lifetime of the FastAPI process."""
     logger.info("FMP worker started (interval=%ds)", POLL_INTERVAL)
 
+    # Maintain previous quotes so the alert engine can detect crossings
+    prev_quotes: dict[str, dict[str, Any]] = {}
+
     while True:
         try:
             symbols = await _get_active_symbols()
@@ -40,9 +44,12 @@ async def run_worker() -> None:
             if symbols:
                 quotes = await fetch_batch_quotes(symbols)
                 if quotes:
-                    await check_alerts(quotes)
+                    await check_alerts(quotes, prev_quotes)
+                    # Update previous quotes — only keep symbols still being watched
+                    prev_quotes = {s: quotes[s] for s in quotes}
             else:
                 logger.debug("No active alert symbols — skipping FMP call")
+                prev_quotes.clear()
 
         except Exception as exc:
             logger.error("Worker loop error: %s", exc, exc_info=True)
